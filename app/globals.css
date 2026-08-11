@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --bg-color: #F3F4ED;
+  --surface: #FFFFFF;
+  --accent-olive: #5A5A40;
+  --accent-olive-hover: #454530;
+  --accent-warm: #E6D5C3;
+  --text-main: #2D3025;
+  --text-muted: #6B705C;
+  --border: #DDE0D0;
+  --font-serif: 'Georgia', serif;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-main);
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Custom Utility Classes for Natural Tones Design */
+.bg-natural-canvas {
+  background-color: var(--bg-color);
+}
+
+.bg-natural-surface {
+  background-color: var(--surface);
+}
+
+.border-natural-grey {
+  border-color: var(--border);
+}
+
+.text-natural-main {
+  color: var(--text-main);
+}
+
+.text-natural-muted {
+  color: var(--text-muted);
+}
+
+.bg-natural-olive {
+  background-color: var(--accent-olive);
+}
+
+.bg-natural-warm {
+  background-color: var(--accent-warm);
+}
+
+.font-serif-natural {
+  font-family: var(--font-serif);
+}
+
+.chat-viewport-dots {
+  background-image: radial-gradient(#DDE0D0 1px, transparent 1px);
+  background-size: 20px 20px;
+}

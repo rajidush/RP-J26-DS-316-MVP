@@ -1,0 +1,6 @@
+{
+  "name": "Socratic Child Safety Prototype",
+  "description": "A modular digital child safety prototype featuring a Socratic state-machine interceptor UI and local SLM offline backend.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
