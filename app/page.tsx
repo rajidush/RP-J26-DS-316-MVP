@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { 
   Shield, 
   Terminal, 
@@ -546,6 +547,14 @@ export default function SocraticPrototype() {
             <Code className="w-4 h-4" />
             Offline Python Hub
           </button>
+          <Link
+            href="/parent"
+            className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition text-[#6B705C] hover:text-[#2D3025]"
+            id="tab-parent-btn"
+          >
+            <User className="w-4 h-4" />
+            Parent Dashboard
+          </Link>
         </div>
       </header>
 
