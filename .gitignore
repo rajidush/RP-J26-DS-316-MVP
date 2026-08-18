@@ -5,3 +5,10 @@ coverage/
 *.log
 .env*
 !.env.example
+__pycache__/
+*.pyc
+offline_backend/venv/
+offline_backend/models/*.onnx
+offline_backend/models/*.bin
+offline_backend/models/*.pt
+
