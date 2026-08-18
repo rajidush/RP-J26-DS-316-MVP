@@ -332,7 +332,18 @@ interface ChatMessage {
 
 export default function SocraticPrototype() {
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<"sandbox" | "codeHub">("sandbox");
+  const [activeTab, setActiveTab] = useState<"sandbox" | "codeHub" | "videoGuard">("sandbox");
+
+  // Zero-Trust Guard States
+  const [guardState, setGuardState] = useState<any>(null);
+  const [guardSimMode, setGuardSimMode] = useState<boolean>(true);
+  const [guardActive, setGuardActive] = useState<boolean>(true);
+
+  // Custom Video Upload & Analysis States
+  const [videoUrl, setVideoUrl] = useState<string>("");
+  const [videoFilename, setVideoFilename] = useState<string>("");
+  const [analyzingVideo, setAnalyzingVideo] = useState<boolean>(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Parent Control Panel Inputs
   const [childAge, setChildAge] = useState<number>(10);
@@ -363,6 +374,230 @@ export default function SocraticPrototype() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory, loadingTurn]);
+
+  // Background Polling of Zero-Trust Guard state
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    const pollGuardState = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/api/guard/state");
+        if (res.ok) {
+          const data = await res.json();
+          setGuardState(data);
+          
+          // Auto block if simulation detects a threat in the background
+          if (data.threat_score > 0.85 && guardSimMode && !interceptActive && !isCompleted) {
+            setLastInterceptionStatus(`ALERT: Zero-Trust Guard intercepted threat: ${data.threat_type}!`);
+            
+            if (data.threat_type === "violence") setViolenceScore(data.threat_score);
+            else if (data.threat_type === "hate_speech") setHateScore(data.threat_score);
+            else if (data.threat_type === "adult_content") setAdultScore(data.threat_score);
+
+            const triggerPayload = {
+              violence_score: data.threat_type === "violence" ? data.threat_score : 0.1,
+              hate_speech_score: data.threat_type === "hate_speech" ? data.threat_score : 0.1,
+              adult_content_score: data.threat_type === "adult_content" ? data.threat_score : 0.1,
+              child_age: childAge,
+            };
+            
+            const triggerRes = await fetch("http://127.0.0.1:8000/api/perception/trigger", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(triggerPayload),
+            });
+            
+            if (triggerRes.ok) {
+              const triggerData = await triggerRes.json();
+              if (triggerData.threat_detected) {
+                setActiveThreatType(triggerData.threat_type);
+                setSessionId(triggerData.session_id);
+                setCurrentPhase("Acknowledge");
+                setChildEmotion("neutral");
+                setAgreedToBoundary(false);
+                setIsCompleted(false);
+                setChatHistory([
+                  { role: "assistant", content: JSON.stringify({ socratic_response_to_child: triggerData.initial_response, child_emotion: "neutral", agreed_to_boundary: false }) }
+                ]);
+                setInterceptActive(true);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // Silent connection issues
+      }
+    };
+    
+    interval = setInterval(pollGuardState, 1000);
+    return () => clearInterval(interval);
+  }, [guardSimMode, interceptActive, isCompleted, childAge]);
+
+  const toggleSimulationMode = async (simMode: boolean) => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/guard/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simulation_mode: simMode }),
+      });
+      if (res.ok) {
+        setGuardSimMode(simMode);
+      }
+    } catch (err) {
+      console.error("Failed to toggle simulation mode:", err);
+    }
+  };
+
+  const toggleMonitorActive = async (active: boolean) => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/guard/toggle-monitor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: active }),
+      });
+      if (res.ok) {
+        setGuardActive(active);
+      }
+    } catch (err) {
+      console.error("Failed to toggle monitor:", err);
+    }
+  };
+
+  // Custom Video Frame Grabber & Analysis Loop
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    const grabFrameAndProcess = async () => {
+      const video = videoRef.current;
+      if (!video || video.paused || video.ended || guardSimMode) return;
+      
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.min(640, video.videoWidth || 640);
+        canvas.height = Math.min(360, video.videoHeight || 360);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const frameB64 = canvas.toDataURL("image/jpeg", 0.65);
+        
+        setAnalyzingVideo(true);
+        const res = await fetch("http://127.0.0.1:8000/api/guard/process-frame", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image_b64: frameB64,
+            filename: videoFilename
+          })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          setGuardState(data);
+          
+          if (data.threat_score > 0.85 && !interceptActive && !isCompleted) {
+            video.pause();
+            setLastInterceptionStatus(`ALERT: Zero-Trust Guard intercepted threat: ${data.threat_type}!`);
+            
+            if (data.threat_type === "violence") setViolenceScore(data.threat_score);
+            else if (data.threat_type === "hate_speech") setHateScore(data.threat_score);
+            else if (data.threat_type === "adult_content") setAdultScore(data.threat_score);
+
+            const triggerPayload = {
+              violence_score: data.threat_type === "violence" ? data.threat_score : 0.1,
+              hate_speech_score: data.threat_type === "hate_speech" ? data.threat_score : 0.1,
+              adult_content_score: data.threat_type === "adult_content" ? data.threat_score : 0.1,
+              child_age: childAge,
+            };
+            
+            const triggerRes = await fetch("http://127.0.0.1:8000/api/perception/trigger", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(triggerPayload),
+            });
+            
+            if (triggerRes.ok) {
+              const triggerData = await triggerRes.json();
+              if (triggerData.threat_detected) {
+                setActiveThreatType(triggerData.threat_type);
+                setSessionId(triggerData.session_id);
+                setCurrentPhase("Acknowledge");
+                setChildEmotion("neutral");
+                setAgreedToBoundary(false);
+                setIsCompleted(false);
+                setChatHistory([
+                  { role: "assistant", content: JSON.stringify({ socratic_response_to_child: triggerData.initial_response, child_emotion: "neutral", agreed_to_boundary: false }) }
+                ]);
+                setInterceptActive(true);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Frame capture processing failed:", err);
+      } finally {
+        setAnalyzingVideo(false);
+      }
+    };
+    
+    if (!guardSimMode && videoUrl) {
+      interval = setInterval(grabFrameAndProcess, 800);
+    }
+    
+    return () => clearInterval(interval);
+  }, [guardSimMode, videoUrl, videoFilename, interceptActive, isCompleted, childAge]);
+
+  const resetGuardSession = async () => {
+    try {
+      await fetch("http://127.0.0.1:8000/api/guard/reset", { method: "POST" });
+      setInterceptActive(false);
+      setIsCompleted(false);
+      setChatHistory([]);
+      setChildEmotion("neutral");
+      setAgreedToBoundary(false);
+      
+      const res = await fetch("http://127.0.0.1:8000/api/guard/state");
+      if (res.ok) {
+        const data = await res.json();
+        setGuardState(data);
+      }
+    } catch (err) {
+      console.error("Failed to reset guard state:", err);
+    }
+  };
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (videoUrl && videoUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(videoUrl);
+    }
+    
+    await resetGuardSession();
+    
+    const url = URL.createObjectURL(file);
+    setVideoUrl(url);
+    setVideoFilename(file.name);
+    toggleSimulationMode(false);
+  };
+
+  const selectPresetVideo = async (type: "nature" | "combat") => {
+    if (videoUrl && videoUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(videoUrl);
+    }
+    
+    await resetGuardSession();
+    
+    if (type === "nature") {
+      setVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4");
+      setVideoFilename("nature_wildlife_doc.mp4");
+    } else {
+      setVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4");
+      setVideoFilename("combat_match_battle_violence.mp4");
+    }
+    toggleSimulationMode(false);
+  };
 
   // Code Hub state
   const [selectedCodeFile, setSelectedCodeFile] = useState<"agent" | "main" | "req" | "readme">("agent");
@@ -533,6 +768,18 @@ export default function SocraticPrototype() {
           >
             <Sliders className="w-4 h-4" />
             Prototype Sandbox
+          </button>
+          <button
+            onClick={() => setActiveTab("videoGuard")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
+              activeTab === "videoGuard" 
+                ? "bg-[#5A5A40] text-white shadow-sm" 
+                : "text-[#6B705C] hover:text-[#2D3025]"
+            }`}
+            id="tab-guard-btn"
+          >
+            <Shield className="w-4 h-4" />
+            Zero-Trust Video Guard
           </button>
           <button
             onClick={() => setActiveTab("codeHub")}
@@ -1325,6 +1572,382 @@ export default function SocraticPrototype() {
               </div>
 
             </div>
+          </section>
+        )}
+        {/* Simplified Zero-Trust Video Guard View */}
+        {activeTab === "videoGuard" && (
+          <section className="col-span-12 grid grid-cols-1 xl:grid-cols-12 gap-6 animate-fade-in" id="video-guard-section">
+            
+            {/* Left Column: 6 Cols - Child Video Portal */}
+            <div className="xl:col-span-6 flex flex-col gap-6">
+              
+              {/* Active Player Card */}
+              <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4">
+                <h3 className="font-semibold text-[#2D3025] flex items-center gap-2 text-sm uppercase tracking-wider font-sans border-b border-[#DDE0D0] pb-2">
+                  <Sliders className="w-4 h-4 text-[#5A5A40]" />
+                  Child Video Portal
+                </h3>
+                
+                <div className="flex flex-col gap-1.5 flex-1 justify-center">
+                  <span className="text-[10px] uppercase font-bold text-[#6B705C] font-sans">Active Video Player</span>
+                  <div className="relative aspect-video rounded-lg border border-[#DDE0D0] overflow-hidden bg-black flex items-center justify-center shadow-inner w-full">
+                    {videoUrl ? (
+                      <video 
+                        ref={videoRef}
+                        src={videoUrl}
+                        controls
+                        className={`w-full h-full object-contain transition duration-500 ${
+                          guardState?.threat_score > 0.85 ? "blur-md pointer-events-none" : ""
+                        }`}
+                      />
+                    ) : (
+                      <div className="text-[#6B705C] text-xs text-center p-6 italic leading-relaxed">
+                        No video loaded. Select a demo preset or upload a custom file below to start!
+                      </div>
+                    )}
+                    
+                    {guardState?.threat_score > 0.85 && (
+                      <div className="absolute inset-0 bg-rose-950/20 flex flex-col items-center justify-center p-3">
+                        <div className="bg-white border border-rose-200 rounded-lg p-3 text-center shadow-lg max-w-[200px]">
+                          <AlertTriangle className="w-8 h-8 text-rose-600 mx-auto mb-1 animate-bounce" />
+                          <h4 className="text-[11px] font-bold text-[#2D3025] uppercase tracking-wider font-sans">Screen Locked</h4>
+                          <p className="text-[9px] text-[#6B705C] mt-0.5 leading-snug">
+                            Violent content detected. Socratic dialogue initiated.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Upload & Preset controls */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-[#DDE0D0] pt-4">
+                  {/* Upload */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] uppercase font-bold text-[#6B705C] font-sans">Upload Video File</span>
+                    <label className="flex items-center justify-center gap-1.5 px-3 py-2 border border-[#DDE0D0] hover:border-[#5A5A40] rounded-lg bg-[#FAF9F6] text-xs font-semibold cursor-pointer text-[#6B705C] hover:text-[#2D3025] transition shadow-2xs">
+                      📁 Choose Video File...
+                      <input 
+                        type="file" 
+                        accept="video/*" 
+                        onChange={handleVideoUpload} 
+                        className="hidden" 
+                      />
+                    </label>
+                    {videoFilename && (
+                      <div className="text-[10px] text-[#5A5A40] font-mono break-all leading-normal bg-[#E6D5C3]/15 border border-[#DDE0D0] p-1.5 rounded">
+                        Playing: {videoFilename}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Presets */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] uppercase font-bold text-[#6B705C] font-sans">Pre-loaded Test Clips</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => selectPresetVideo("nature")}
+                        className={`text-xs py-2 px-1.5 border rounded-md font-semibold transition ${
+                          videoFilename === "nature_wildlife_doc.mp4" 
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-2xs" 
+                            : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200"
+                        }`}
+                      >
+                        🟢 Nature Video
+                      </button>
+                      <button
+                        onClick={() => selectPresetVideo("combat")}
+                        className={`text-xs py-2 px-1.5 border rounded-md font-semibold transition ${
+                          videoFilename === "combat_match_battle_violence.mp4"
+                            ? "bg-rose-600 text-white border-rose-600 shadow-2xs"
+                            : "bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200"
+                        }`}
+                      >
+                        💥 Combat Video
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Right Column: 6 Cols - Parent AI Visual Stream */}
+            <div className="xl:col-span-6 flex flex-col gap-6">
+              
+              {/* Real-time AI Visual Feed Monitor */}
+              <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4">
+                <h3 className="font-semibold text-[#2D3025] flex items-center gap-2 text-sm uppercase tracking-wider font-sans border-b border-[#DDE0D0] pb-2">
+                  <Shield className="w-4 h-4 text-[#5A5A40]" />
+                  AI Visual Scan Feed
+                </h3>
+
+                <div className="relative aspect-video w-full rounded-lg border border-[#DDE0D0] overflow-hidden bg-slate-950 flex items-center justify-center shadow-inner">
+                  {guardState?.last_frame ? (
+                    <img 
+                      src={guardState.last_frame} 
+                      alt="AI Visual Bounding Boxes" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="text-slate-500 text-xs flex flex-col items-center gap-2">
+                      <RefreshCw className="w-6 h-6 animate-spin text-[#5A5A40]" />
+                      Waiting for active video frames...
+                    </div>
+                  )}
+                  {analyzingVideo && (
+                    <span className="absolute top-2 right-2 bg-emerald-500 text-white font-mono text-[9px] px-1.5 py-0.5 rounded animate-pulse shadow-sm z-10">
+                      AI SCANNING...
+                    </span>
+                  )}
+                </div>
+
+                {/* Threat score progress bar */}
+                <div className="p-4 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex flex-col gap-3">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-[#2D3025] font-sans">Safety Evaluation Threat Score</span>
+                    <span className={guardState?.threat_score > 0.85 ? "text-rose-600 font-bold" : "text-[#5A5A40]"}>
+                      {guardState ? (guardState.threat_score * 100).toFixed(0) : 0}% / 85% Gate
+                    </span>
+                  </div>
+                  <div className="w-full bg-[#E1E2D9] h-3 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all duration-500 ${
+                        guardState?.threat_score > 0.85 ? "bg-rose-500" : "bg-[#5A5A40]"
+                      }`}
+                      style={{ width: `${guardState ? guardState.threat_score * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-[#6B705C] font-sans">
+                    <span>Safety Gate limit: 85%</span>
+                    <span className={guardState?.threat_score > 0.85 ? "text-rose-600 font-bold" : "text-emerald-700 font-bold"}>
+                      {guardState?.threat_score > 0.85 ? "🚨 INTERCEPT LOCKED" : "🛡️ ACTIVE MONITORING"}
+                    </span>
+                  </div>
+                  
+                  <button 
+                    onClick={async () => {
+                      await resetGuardSession();
+                      setLastInterceptionStatus("Ready & Guarding System");
+                    }}
+                    className="mt-2 py-2 px-3 bg-white hover:bg-slate-50 border border-[#DDE0D0] text-[#5A5A40] hover:text-[#2D3025] text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Reset Detection State
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Secure Screen Interception Overlay */}
+            <AnimatePresence>
+              {interceptActive && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 bg-[#2D3025]/80 backdrop-blur-xs flex flex-col items-center justify-center p-6 z-50 overflow-hidden"
+                  id="socratic-buddy-interceptor-vg"
+                >
+                  <motion.div 
+                    initial={{ scale: 0.95, y: 15 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.95, y: 15 }}
+                    className="bg-white border border-[#DDE0D0] rounded-2xl w-full max-w-lg shadow-xl flex flex-col overflow-hidden h-[95%] relative animate-fade-in"
+                    id="interceptor-dialog-card-vg"
+                  >
+                    
+                    {/* Safe Intervention Banner */}
+                    <div className="bg-[#5A5A40] p-4 flex items-center justify-between text-white border-b border-[#DDE0D0] shrink-0" id="buddy-banner-vg">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-white/10 p-1.5 rounded-lg">
+                          <Shield className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-bold tracking-tight text-white font-sans">Socratic Buddy Safe Guard</h3>
+                          <p className="text-[10px] text-[#E6D5C3]">Video Shield Intercept Active</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-1 bg-[#FAF9F6]/10 px-2 py-1 rounded text-[10px] font-mono border border-white/5">
+                        <Lock className="w-3 h-3 text-white" /> Offline Intercept
+                      </div>
+                    </div>
+
+                    {/* Dialogue Timeline Progress Header */}
+                    <div className="bg-[#FAF9F6] border-b border-[#DDE0D0] px-4 py-3 flex items-center justify-between text-[11px] shrink-0 text-[#6B705C]" id="dialogue-timeline-vg">
+                      <span className="text-[#6B705C] font-semibold uppercase tracking-wider">State Machine progression:</span>
+                      <div className="flex items-center gap-1" id="progress-states-list-vg">
+                        <span className={`px-2 py-0.5 rounded font-medium ${
+                          currentPhase === "Acknowledge" 
+                            ? "bg-[#E6D5C3]/40 text-[#2D3025] border border-[#5A5A40] font-bold" 
+                            : "bg-white text-[#6B705C] border border-transparent"
+                        }`}>
+                          1. Ack
+                        </span>
+                        <ChevronRight className="w-3 h-3 text-[#6B705C]" />
+                        <span className={`px-2 py-0.5 rounded font-medium ${
+                          currentPhase === "Reason" 
+                            ? "bg-[#E6D5C3]/40 text-[#2D3025] border border-[#5A5A40] font-bold" 
+                            : "bg-white text-[#6B705C] border border-transparent"
+                        }`}>
+                          2. Reason
+                        </span>
+                        <ChevronRight className="w-3 h-3 text-[#6B705C]" />
+                        <span className={`px-2 py-0.5 rounded font-medium ${
+                          currentPhase === "Contract" 
+                            ? "bg-[#E6D5C3]/40 text-[#2D3025] border border-[#5A5A40] font-bold" 
+                            : "bg-white text-[#6B705C] border border-transparent"
+                        }`}>
+                          3. Contract
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Interactive Chat Board area */}
+                    <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-4 bg-[#FAF9F6]" id="buddy-chat-history-vg">
+                      
+                      {/* Socratic Avatar Greeting Bubble */}
+                      <div className="flex items-start gap-3" id="buddy-avatar-greeting-vg">
+                        <div className="w-10 h-10 rounded-xl bg-[#5A5A40] flex items-center justify-center font-bold text-white shadow-xs shrink-0 font-sans">
+                          SB
+                        </div>
+                        <div className="bg-white border border-[#DDE0D0] rounded-xl p-3.5 max-w-[85%] text-[#2D3025] text-xs shadow-xs leading-relaxed">
+                          <span className="font-bold text-[#5A5A40] block mb-1">Socratic Buddy</span>
+                          Hi! Socratic Buddy here. Unsafe video content was detected, so I have locked the video screen to keep you safe. Let&apos;s talk about what was on the screen.
+                        </div>
+                      </div>
+
+                      {chatHistory.map((item, index) => {
+                        let textContent = item.content;
+                        let metaInfo = null;
+
+                        try {
+                          const parsed = JSON.parse(item.content);
+                          if (parsed && parsed.socratic_response_to_child) {
+                            textContent = parsed.socratic_response_to_child;
+                            metaInfo = {
+                              emotion: parsed.child_emotion,
+                              agreed: parsed.agreed_to_boundary
+                            };
+                          }
+                        } catch {
+                          // Not a JSON turn
+                        }
+
+                        return (
+                          <div 
+                            key={index} 
+                            className={`flex items-start gap-3 ${item.role === "user" ? "flex-row-reverse" : ""}`}
+                            id={`chat-turn-vg-${index}`}
+                          >
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold shadow-xs shrink-0 font-sans ${
+                              item.role === "user" 
+                                ? "bg-[#E6D5C3] text-[#2D3025] border border-[#5A5A40]" 
+                                : "bg-[#5A5A40] text-white border border-[#5A5A40]"
+                            }`}>
+                              {item.role === "user" ? "ME" : "SB"}
+                            </div>
+                            
+                            <div className={`border rounded-xl p-3.5 max-w-[85%] text-xs shadow-xs leading-relaxed ${
+                              item.role === "user"
+                                ? "bg-[#E6D5C3]/20 border-[#DDE0D0] text-[#2D3025]"
+                                : "bg-white border-[#DDE0D0] text-[#2D3025]"
+                            }`}>
+                              <span className="font-bold block mb-1 text-[#5A5A40]">
+                                {item.role === "user" ? "My Response" : "Socratic Buddy"}
+                              </span>
+                              {textContent}
+
+                              {metaInfo && (
+                                <div className="mt-2.5 pt-2 border-t border-[#DDE0D0] flex items-center gap-2 text-[10px] text-[#6B705C] font-sans">
+                                  <span className="bg-[#FAF9F6] px-1.5 py-0.5 rounded border border-[#DDE0D0]">
+                                    Emotion: <span className="text-[#5A5A40] font-bold capitalize">{metaInfo.emotion}</span>
+                                  </span>
+                                  {metaInfo.agreed && (
+                                    <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
+                                      ✓ Boundary Agreed
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {loadingTurn && (
+                        <div className="flex items-center gap-3" id="buddy-loading-indicator-vg">
+                          <div className="w-10 h-10 rounded-xl bg-[#5A5A40] flex items-center justify-center font-bold text-white border border-[#5A5A40] shrink-0 font-sans">
+                            SB
+                          </div>
+                          <div className="bg-white border border-[#DDE0D0] rounded-xl p-3 max-w-[85%] text-[#6B705C] text-xs shadow-xs italic flex items-center gap-2">
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#5A5A40]" />
+                            Formulating safety response...
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Dialogue Completion Screen */}
+                    {isCompleted && (
+                      <div className="p-4 bg-white border-t border-[#DDE0D0] shrink-0 flex items-center justify-center" id="pivot-redirection-overlay-vg">
+                        <div className="bg-white border border-emerald-200 p-4 rounded-2xl max-w-sm flex flex-col items-center gap-4 shadow-sm">
+                          <CheckCircle className="w-16 h-16 text-emerald-600" />
+                          <div>
+                            <h3 className="text-base font-bold text-[#2D3025] font-sans text-center">Dialogue Shield Confirmed!</h3>
+                            <p className="text-xs text-[#6B705C] mt-1 text-center leading-relaxed">
+                              You did an amazing job talking this through. We have closed that unsafe window. Let&apos;s redirect to a fun learning site together!
+                            </p>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              await resetGuardSession();
+                              setChildActiveApp("game");
+                              setActiveTab("sandbox");
+                              setLastInterceptionStatus("Successfully scaffolded child. Safe app loaded.");
+                            }}
+                            className="w-full py-2.5 px-4 bg-[#5A5A40] hover:bg-[#454530] text-white font-bold rounded-lg text-xs flex items-center justify-center gap-2 transition duration-200 shadow-sm"
+                            id="btn-redirect-fun-vg"
+                          >
+                            Redirect to Currie&apos;s Sandbox <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Input Area */}
+                    {!isCompleted && (
+                      <form 
+                        onSubmit={handleSendDialogue}
+                        className="bg-white border-t border-[#DDE0D0] p-3.5 flex items-center gap-2 shrink-0"
+                        id="chat-input-form-vg"
+                      >
+                        <input 
+                          type="text" 
+                          placeholder="Type your response to Socratic Buddy..." 
+                          value={userInput}
+                          onChange={(e) => setUserInput(e.target.value)}
+                          disabled={loadingTurn}
+                          className="flex-1 border border-[#DDE0D0] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#5A5A40] disabled:opacity-50 disabled:bg-[#FAF9F6]"
+                          id="input-buddy-msg-vg"
+                        />
+                        <button
+                          type="submit"
+                          disabled={loadingTurn || !userInput.trim()}
+                          className="px-4 py-2 bg-[#5A5A40] hover:bg-[#454530] disabled:bg-slate-200 text-white font-bold rounded-lg text-xs transition duration-200 shrink-0 font-sans"
+                          id="btn-send-buddy-vg"
+                        >
+                          Send
+                        </button>
+                      </form>
+                    )}
+
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
           </section>
         )}
 

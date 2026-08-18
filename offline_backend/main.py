@@ -22,7 +22,22 @@ app.add_middleware(
 # Configured for default LM Studio local server on http://localhost:1234/v1
 agent_manager = SocraticAgentManager(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
+# Initialize Zero-Trust Guard
+from guard import ZeroTrustGuard
+guard_system = ZeroTrustGuard()
+guard_system.start()
+
 # --- Schemas ---
+
+class GuardToggleRequest(BaseModel):
+    simulation_mode: bool
+
+class GuardMonitorRequest(BaseModel):
+    active: bool
+
+class FrameAnalysisRequest(BaseModel):
+    image_b64: str
+    filename: str = ""
 
 class ThreatTriggerRequest(BaseModel):
     violence_score: float = Field(0.0, description="Confidence score for violence (0.0 to 1.0)")
@@ -164,6 +179,48 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
         current_phase=result["state_info"]["next_phase"],
         completed=result["state_info"]["completed"]
     )
+
+@app.get("/api/guard/state")
+def get_guard_state():
+    """
+    Returns the complete real-time state of the Zero-Trust Guard pipeline.
+    """
+    return guard_system.get_state()
+
+@app.post("/api/guard/toggle")
+def toggle_guard_simulation(payload: GuardToggleRequest):
+    """
+    Toggles between Simulation Mode and Live Mode.
+    """
+    guard_system.set_simulation_mode(payload.simulation_mode)
+    return {"status": "ok", "simulation_mode": payload.simulation_mode}
+
+@app.post("/api/guard/toggle-monitor")
+def toggle_guard_monitor(payload: GuardMonitorRequest):
+    """
+    Toggles active background scanning.
+    """
+    if payload.active:
+        guard_system.start()
+    else:
+        guard_system.stop()
+    return {"status": "ok", "active": payload.active}
+
+@app.post("/api/guard/process-frame")
+def process_custom_frame(payload: FrameAnalysisRequest):
+    """
+    Accepts a base64 encoded frame from an uploaded/playing video in the browser,
+    runs process scanners, scene-change differencing, and object detections.
+    """
+    return guard_system.process_custom_frame(payload.image_b64, payload.filename)
+
+@app.post("/api/guard/reset")
+def reset_guard_state():
+    """
+    Resets the state of the Zero-Trust Guard.
+    """
+    guard_system.reset()
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
