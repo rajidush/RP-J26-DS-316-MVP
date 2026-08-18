@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import AnalystPanel from "./analyst-panel";
+import { BACKEND_URL } from "./lib/backend";
 import { 
   Shield, 
   Terminal, 
@@ -385,26 +387,31 @@ export default function SocraticPrototype() {
   };
 
   // Trigger Socratic Intercept Simulation (Local FastAPI + LM Studio)
-  const handleTriggerIntercept = async () => {
+  const handleTriggerIntercept = async (scoreOverride?: { hate?: number }) => {
     setApiError(null);
     setLastInterceptionStatus("Analyzing content vectors...");
 
+    const nextHate = scoreOverride?.hate ?? hateScore;
+    if (scoreOverride?.hate != null) {
+      setHateScore(scoreOverride.hate);
+    }
+
     const payload = {
       violence_score: violenceScore,
-      hate_speech_score: hateScore,
+      hate_speech_score: nextHate,
       adult_content_score: adultScore,
       child_age: childAge,
     };
 
     try {
       // Direct local connection to FastAPI
-      const res = await fetch("http://127.0.0.1:8000/api/perception/trigger", {
+      const res = await fetch(`${BACKEND_URL}/api/perception/trigger`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Could not connect to local FastAPI backend. Ensure python main.py is running on http://127.0.0.1:8000");
+      if (!res.ok) throw new Error(`Could not connect to local FastAPI backend. Ensure python main.py is running on ${BACKEND_URL}`);
       const data = await res.json();
 
       if (data.threat_detected) {
@@ -445,7 +452,7 @@ export default function SocraticPrototype() {
 
     try {
       // Local FastAPI dialogue turn
-      const res = await fetch("http://127.0.0.1:8000/api/dialogue/turn", {
+      const res = await fetch(`${BACKEND_URL}/api/dialogue/turn`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -456,7 +463,7 @@ export default function SocraticPrototype() {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || "Local FastAPI turn failed. Make sure python main.py is running on http://127.0.0.1:8000 and LM Studio server is started.");
+        throw new Error(errData.detail || `Local FastAPI turn failed. Make sure python main.py is running on ${BACKEND_URL} and LM Studio server is started.`);
       }
       const data = await res.json();
 
@@ -582,10 +589,25 @@ export default function SocraticPrototype() {
                 <div className="p-3.5 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg text-xs text-[#6B705C] flex items-start gap-2.5" id="local-backend-info">
                   <Terminal className="w-4 h-4 mt-0.5 shrink-0 text-[#5A5A40]" />
                   <div className="leading-relaxed">
-                    Connected to <strong className="text-[#2D3025]">Local Python Backend</strong> (<code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">http://127.0.0.1:8000</code>) &amp; <strong className="text-[#2D3025]">LM Studio</strong> (<code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">http://localhost:1234</code>).
+                    Connected to <strong className="text-[#2D3025]">Local Python Backend</strong> (<code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">{BACKEND_URL}</code>) &amp; <strong className="text-[#2D3025]">LM Studio</strong> (<code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">http://localhost:1234</code>).
                   </div>
                 </div>
               </div>
+
+              <AnalystPanel
+                childAge={childAge}
+                onScore={(score, decision) => {
+                  setHateScore(score);
+                  setLastInterceptionStatus(
+                    decision === "hate"
+                      ? `Analyst flagged hate_speech (${score.toFixed(2)}). Frame wiped from RAM.`
+                      : `Analyst: not-hate (${score.toFixed(2)}). Frame wiped from RAM.`
+                  );
+                }}
+                onIntercept={(hate) => {
+                  void handleTriggerIntercept({ hate });
+                }}
+              />
 
               {/* Perception Layer Slider Controls */}
               <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-5" id="perception-panel">

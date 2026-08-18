@@ -1,8 +1,11 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uuid
+from typing import Optional
 from socratic_agent import SocraticAgentManager
+from analyst.pipeline import get_pipeline
+from analyst.schema import AnalystHealth, AnalystResult
 
 app = FastAPI(
     title="Socratic Digital Child Safety Engine",
@@ -56,8 +59,47 @@ def read_root():
     return {
         "status": "online",
         "system": "Socratic Buddy Child Safety Interceptor",
-        "engine_target": "LM Studio (http://localhost:1234/v1)"
+        "engine_target": "LM Studio (http://localhost:1234/v1)",
+        "analyst": "http://127.0.0.1:8001/api/analyst/health",
     }
+
+
+@app.get("/api/analyst/health", response_model=AnalystHealth)
+def analyst_health():
+    """Which Analyst backends are live. Missing OCR/Whisper/ONNX does not take the API down."""
+    return get_pipeline().health()
+
+
+@app.post("/api/analyst/analyze", response_model=AnalystResult)
+async def analyst_analyze(
+    child_age: int = Form(10),
+    overlay_text: str = Form(""),
+    capture_screen: str = Form("false"),
+    image: Optional[UploadFile] = File(None),
+    audio: Optional[UploadFile] = File(None),
+):
+    """
+    Hate-speech cascade. Image/audio stay in RAM for this request, then are zeroed.
+    The web client receives JSON only — never the stored frame.
+    """
+    image_bytes = await image.read() if image is not None else None
+    audio_bytes = await audio.read() if audio is not None else None
+    if image is not None:
+        await image.close()
+    if audio is not None:
+        await audio.close()
+
+    grab = capture_screen.strip().lower() in ("1", "true", "yes")
+    try:
+        return get_pipeline().analyze(
+            child_age=child_age,
+            overlay_text=overlay_text,
+            image_bytes=image_bytes,
+            audio_bytes=audio_bytes,
+            capture_screen=grab,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Analyst failure: {exc}") from exc
 
 @app.post("/api/perception/trigger", response_model=ThreatTriggerResponse)
 def trigger_threat(payload: ThreatTriggerRequest):
@@ -167,5 +209,4 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    # In production, run on uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:app", host="127.0.0.1", port=8001, reload=True)
