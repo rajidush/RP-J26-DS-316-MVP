@@ -2,9 +2,31 @@
 
 from __future__ import annotations
 
+import numpy as np
 from typing import Optional
 
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
+
+
+# RapidOCR works best on images >= 640 px wide with good contrast.
+_MIN_WIDTH = 640
+
+
+def _preprocess(image: Image.Image) -> np.ndarray:
+    """Convert PIL image to a preprocessed numpy array for RapidOCR."""
+    rgb = image.convert("RGB")
+
+    # Scale up small images so text is readable for the detection model.
+    w, h = rgb.size
+    if w < _MIN_WIDTH:
+        scale = _MIN_WIDTH / w
+        rgb = rgb.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+    # Mild sharpening helps with screen-rendered fonts.
+    rgb = ImageEnhance.Sharpness(rgb).enhance(1.5)
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.3)
+
+    return np.array(rgb)
 
 
 class OcrEngine:
@@ -38,10 +60,10 @@ class OcrEngine:
     def extract(self, image: Optional[Image.Image]) -> str:
         if image is None:
             return ""
-        rgb = image.convert("RGB")
         if self._rapid is not None:
             try:
-                result, _ = self._rapid(rgb)
+                arr = _preprocess(image)
+                result, _ = self._rapid(arr)
                 if not result:
                     return ""
                 lines = [row[1] for row in result if len(row) > 1 and row[1]]
@@ -50,6 +72,7 @@ class OcrEngine:
                 pass
         if self._tesseract is not None:
             try:
+                rgb = image.convert("RGB")
                 return (self._tesseract.image_to_string(rgb) or "").strip()
             except Exception:
                 return ""

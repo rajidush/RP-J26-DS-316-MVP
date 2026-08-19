@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import io
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from PIL import Image
 
-from .asr import asr_status, transcribe
+from .asr import AsrEngine
 from .buffer import TransientMediaBuffer
 from .capture import grab_screen_jpeg
 from .ocr import OcrEngine
@@ -44,6 +45,7 @@ class AnalystPipeline:
     def __init__(self) -> None:
         self.buffer = TransientMediaBuffer(max_slots=2)
         self.ocr = OcrEngine()
+        self.asr = AsrEngine()
         self.text = TextClassifier()
         self.vision = VisionClassifier()
 
@@ -58,7 +60,7 @@ class AnalystPipeline:
             notes.append(
                 "Vision ONNX not loaded. Image-only hate waits for models/vision_stage1.onnx."
             )
-        if asr_status() == "none":
+        if self.asr.name == "none":
             notes.append(
                 "Whisper not installed. Voice is skipped; OCR + overlay text still score."
             )
@@ -70,7 +72,7 @@ class AnalystPipeline:
     def _backends(self) -> BackendStatus:
         return BackendStatus(
             ocr=self.ocr.name,
-            asr=asr_status(),
+            asr=self.asr.name,
             text=self.text.name,
             vision=self.vision.name,
             capture="pillow_grab",
@@ -137,8 +139,16 @@ class AnalystPipeline:
         notes: list[str],
     ) -> AnalystResult:
         image = _image_from_bytes(frame)
-        ocr_text = self.ocr.extract(image)
-        transcript = transcribe(audio)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            ocr_future = pool.submit(self.ocr.extract, image)
+            asr_future = pool.submit(self.asr.transcribe, audio)
+            ocr_text = ocr_future.result()
+            transcript = asr_future.result()
+
+        if audio and not transcript:
+            notes.append("asr_empty_or_unavailable")
+        if audio and not transcript and self.asr.name == "none":
+            notes.append("install faster-whisper for voice")
         combined_text = " ".join(
             part for part in (overlay_text, ocr_text, transcript) if part
         ).strip()

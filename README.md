@@ -244,7 +244,7 @@ This is the meme case from the TAF: safe picture + safe caption → toxic only w
 | 1 | Agree IPC trigger + output JSON with Components 1, 3, 4 | Team contract | Live `hate_speech_score` + `/api/analyst/analyze` |
 | 2 | Phase 5 stub in the sandbox (slider / preset → intercept → parent log) | Schema | Done |
 | 3 | Phase 1 capture-on-trigger | Component 1 event | RAM buffer + optional server screenshot; media deleted after each run |
-| 4 | Phase 2 OCR + ASR + dual fast checks | Phase 1 | Lexicon text always on; OCR/ASR/vision plug in when installed |
+| 4 | Phase 2 OCR + ASR + dual fast checks | Phase 1 | OCR live (RapidOCR). ASR: Whisper tiny on CPU; voice clip or 6s mic record |
 | 5 | Phase 4 dataset mix, fine-tune, CPU eval vs pretrained | Public datasets | Slot ready: `models/text_hate.onnx` |
 | 6 | Phase 3 vision branch + fusion, Hateful Memes hold-out | Phases 2 and 4 | Fusion rule live; ONNX deferred: `models/vision_stage1.onnx` |
 | 7 | Replace the sandbox slider with live `risk_score` from the Analyst | Phases 1–5 | Analyst panel writes the slider, then can intercept |
@@ -269,7 +269,7 @@ The current MVP runs the Analyst cascade locally. OCR, Whisper, and vision ONNX 
 | Hate-speech risk score as a perception vector | Implemented (`hate_speech_score`, gate **> 0.85**) |
 | Live Analyst cascade (hold → analyse → delete) | Implemented (`POST /api/analyst/analyze`) |
 | Lexicon text scorer (slang/threat; gaming trash talk stays below gate) | Implemented |
-| OCR / Whisper / vision ONNX | Optional plugs — see `requirements-analyst.txt` and `offline_backend/models/` |
+| OCR / Whisper / vision ONNX | OCR live. Whisper tiny installed for voice. Vision ONNX still deferred |
 | Hate-speech preset and parent-dashboard telemetry | Implemented |
 | Threshold breach → local Socratic intercept (Component 3 stub) | Implemented via FastAPI + LM Studio |
 | Zero data transit (local FastAPI, no cloud LLM) | Implemented |
