@@ -26,6 +26,7 @@ import {
   Check
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { BACKEND_URL } from "../lib/backend";
 
 interface ChildPersona {
   id: string;
@@ -79,6 +80,41 @@ export default function ParentDashboard() {
 
   // New Persona creation state
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+
+  // Backend Integration State
+  const [backendData, setBackendData] = useState<{
+    analyst_runs: any[];
+    socratic_sessions: any[];
+  } | null>(null);
+  const [backendAvailable, setBackendAvailable] = useState<boolean>(false);
+
+  // Poll parent dashboard data from Python backend
+  useEffect(() => {
+    let active = true;
+    const fetchData = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/parent/dashboard-data`);
+        if (!res.ok) throw new Error("Backend connection failed");
+        const data = await res.json();
+        if (active) {
+          setBackendData(data);
+          setBackendAvailable(true);
+        }
+      } catch (err) {
+        if (active) {
+          setBackendAvailable(false);
+        }
+      }
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 3000); // poll every 3 seconds
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   // Initialize personas from localStorage or defaults
   useEffect(() => {
@@ -169,36 +205,320 @@ export default function ParentDashboard() {
     }
   };
 
-  // Mock Overview Analytics Data (Dynamic overrides based on active child age)
+  // Mock/Real Overview Analytics Data
   const getMetrics = () => {
-    if (activePersona.age <= 10) {
-      return {
-        intercepts: 24,
-        interceptsTrend: "↓ 12% vs yesterday",
-        alerts: 3,
-        alertsTrend: "↓ 25% vs yesterday",
-        hateSpeech: 7,
-        hateSpeechTrend: "↓ 8% vs yesterday",
-        screenTime: "2h 45m",
-        screenTimeTrend: "↓ 15% vs yesterday",
-        anomalyScore: 0.28,
-        threats: { violence: 8, hate: 6, adult: 5, controversial: 3, other: 2 }
-      };
-    } else {
-      // Teenagers have different baseline stats
-      return {
-        intercepts: 41,
-        interceptsTrend: "↑ 8% vs yesterday",
-        alerts: 6,
-        alertsTrend: "↓ 10% vs yesterday",
-        hateSpeech: 12,
-        hateSpeechTrend: "↑ 14% vs yesterday",
-        screenTime: "4h 20m",
-        screenTimeTrend: "↑ 5% vs yesterday",
-        anomalyScore: 0.54,
-        threats: { violence: 10, hate: 15, adult: 9, controversial: 5, other: 2 }
-      };
+    const defaults = activePersona.age <= 10
+      ? {
+          intercepts: 24,
+          interceptsTrend: "↓ 12% vs yesterday",
+          alerts: 3,
+          alertsTrend: "↓ 25% vs yesterday",
+          hateSpeech: 7,
+          hateSpeechTrend: "↓ 8% vs yesterday",
+          screenTime: "2h 45m",
+          screenTimeTrend: "↓ 15% vs yesterday",
+          anomalyScore: 0.28,
+          threats: { violence: 8, hate: 6, adult: 5, controversial: 3, other: 2 }
+        }
+      : {
+          intercepts: 41,
+          interceptsTrend: "↑ 8% vs yesterday",
+          alerts: 6,
+          alertsTrend: "↓ 10% vs yesterday",
+          hateSpeech: 12,
+          hateSpeechTrend: "↑ 14% vs yesterday",
+          screenTime: "4h 20m",
+          screenTimeTrend: "↑ 5% vs yesterday",
+          anomalyScore: 0.54,
+          threats: { violence: 10, hate: 15, adult: 9, controversial: 5, other: 2 }
+        };
+
+    if (backendAvailable && backendData) {
+      const runsForChild = (backendData.analyst_runs || []).filter(r => r.child_age === activePersona.age);
+      const sessionsForChild = (backendData.socratic_sessions || []).filter(s => s.child_age === activePersona.age);
+
+      if (runsForChild.length > 0 || sessionsForChild.length > 0) {
+        const realHateSpeechCount = runsForChild.filter(r => r.decision === "hate" && r.category === "hate_speech").length;
+        const realInterceptsCount = sessionsForChild.length;
+        const realAlertsCount = runsForChild.filter(r => r.decision === "hate").length;
+
+        const threats = { violence: 0, hate: 0, adult: 0, controversial: 0, other: 0 };
+        runsForChild.forEach(r => {
+          if (r.decision === "hate") {
+            const cat = r.category || "";
+            if (cat.includes("violence")) threats.violence++;
+            else if (cat.includes("hate")) threats.hate++;
+            else if (cat.includes("adult")) threats.adult++;
+            else if (cat.includes("controversial")) threats.controversial++;
+            else threats.other++;
+          }
+        });
+        sessionsForChild.forEach(s => {
+          const tType = s.threat_type || "";
+          if (tType.includes("violence")) threats.violence++;
+          else if (tType.includes("hate")) threats.hate++;
+          else if (tType.includes("adult")) threats.adult++;
+          else if (tType.includes("controversial")) threats.controversial++;
+          else threats.other++;
+        });
+
+        let anomalyScore = defaults.anomalyScore;
+        const allEmotions: string[] = [];
+        sessionsForChild.forEach(s => {
+          (s.turns || []).forEach((t: any) => {
+            if (t.child_emotion) allEmotions.push(t.child_emotion.toLowerCase());
+          });
+        });
+        if (allEmotions.length > 0) {
+          const negativeCount = allEmotions.filter(e => ["scared", "defensive", "frustrated", "angry"].includes(e)).length;
+          anomalyScore = parseFloat((negativeCount / allEmotions.length).toFixed(2));
+          anomalyScore = Math.max(0.1, Math.min(0.95, anomalyScore));
+        }
+
+        return {
+          intercepts: realInterceptsCount,
+          interceptsTrend: realInterceptsCount > 0 ? "Real-time count" : defaults.interceptsTrend,
+          alerts: realAlertsCount,
+          alertsTrend: realAlertsCount > 0 ? "Real-time count" : defaults.alertsTrend,
+          hateSpeech: realHateSpeechCount,
+          hateSpeechTrend: realHateSpeechCount > 0 ? "Real-time count" : defaults.hateSpeechTrend,
+          screenTime: defaults.screenTime,
+          screenTimeTrend: defaults.screenTimeTrend,
+          anomalyScore: anomalyScore,
+          threats: threats
+        };
+      }
     }
+
+    return defaults;
+  };
+
+  // Dynamic Socratic Emotion Trendpoints
+  const getEmotionTrendPoints = () => {
+    if (!backendAvailable || !backendData) return null;
+    const sessions = [...backendData.socratic_sessions]
+      .filter(s => s.child_age === activePersona.age)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    const emotionTurns: { emotion: string; timeStr: string }[] = [];
+    sessions.forEach(session => {
+      (session.turns || []).forEach((turn: any) => {
+        if (turn.child_emotion && turn.child_emotion !== "none") {
+          emotionTurns.push({
+            emotion: turn.child_emotion.toLowerCase(),
+            timeStr: turn.time_str || ""
+          });
+        }
+      });
+    });
+
+    if (emotionTurns.length === 0) return null;
+
+    const recentTurns = emotionTurns.slice(-7);
+    while (recentTurns.length < 7 && recentTurns.length > 0) {
+      recentTurns.unshift({ emotion: "neutral", timeStr: "Start" });
+    }
+
+    const emotionToY = (emo: string): number => {
+      switch (emo) {
+        case "resolved":
+        case "compliant":
+        case "happy":
+          return 20;
+        case "reflective":
+        case "curious":
+          return 50;
+        case "neutral":
+        case "unknown":
+        case "unclear":
+          return 80;
+        case "scared":
+        case "defensive":
+          return 110;
+        case "frustrated":
+        case "angry":
+          return 140;
+        default:
+          return 80;
+      }
+    };
+
+    const emotionToColor = (emo: string): string => {
+      switch (emo) {
+        case "resolved":
+        case "compliant":
+        case "happy":
+        case "reflective":
+        case "curious":
+          return "#10B981";
+        case "neutral":
+        case "unknown":
+        case "unclear":
+          return "#F59E0B";
+        case "scared":
+        case "defensive":
+        case "frustrated":
+        case "angry":
+          return "#F43F5E";
+        default:
+          return "#F59E0B";
+      }
+    };
+
+    const points = recentTurns.map((turn, idx) => {
+      const x = recentTurns.length > 1
+        ? 10 + idx * (280 / (recentTurns.length - 1))
+        : 150;
+      const y = emotionToY(turn.emotion);
+      return {
+        x,
+        y,
+        color: emotionToColor(turn.emotion),
+        emotion: turn.emotion,
+        timeStr: turn.timeStr
+      };
+    });
+
+    let pathD = "";
+    if (points.length > 0) {
+      pathD = `M ${points[0].x} ${points[0].y}`;
+      for (let i = 1; i < points.length; i++) {
+        pathD += ` L ${points[i].x} ${points[i].y}`;
+      }
+    }
+
+    return { points, pathD };
+  };
+
+  const emotionTrend = getEmotionTrendPoints();
+
+  // Dynamic Recent Alerts
+  const getRecentAlerts = () => {
+    const list: any[] = [];
+    if (backendAvailable && backendData) {
+      const runs = (backendData.analyst_runs || [])
+        .filter(r => r.child_age === activePersona.age && r.decision === "hate");
+      runs.forEach(run => {
+        const sourceName = run.source.ocr ? "OCR Search" : run.source.overlay ? "Overlay Text" : run.source.asr ? "Audio Transcript" : "Vision Screen Grab";
+        list.push({
+          id: run.id,
+          timestamp: new Date(run.timestamp),
+          timeStr: run.time_str,
+          title: `Hate Speech Detected (${run.category.replace('_', ' ')})`,
+          app: `Analyst: ${sourceName}`,
+          severity: run.risk_score > 0.9 ? "High" : "Medium",
+          severityColor: "bg-rose-50 text-rose-700 border border-rose-100",
+          iconBg: "bg-rose-50 text-rose-600"
+        });
+      });
+
+      const sessions = (backendData.socratic_sessions || [])
+        .filter(s => s.child_age === activePersona.age);
+      sessions.forEach(sess => {
+        list.push({
+          id: `sess-${sess.session_id}`,
+          timestamp: new Date(sess.timestamp),
+          timeStr: sess.time_str,
+          title: `Socratic Intercept Activated`,
+          app: `Perception: ${sess.threat_type.replace('_', ' ')}`,
+          severity: "High",
+          severityColor: "bg-orange-50 text-orange-700 border border-orange-100",
+          iconBg: "bg-orange-50 text-orange-600"
+        });
+      });
+    }
+
+    list.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    return list.length > 0 ? list.slice(0, 5) : null;
+  };
+
+  const recentAlerts = getRecentAlerts();
+
+  // Dynamic Explainable AI
+  const getExplainableAI = () => {
+    const list: any[] = [];
+    if (backendAvailable && backendData) {
+      const runs = (backendData.analyst_runs || [])
+        .filter(r => r.child_age === activePersona.age && r.decision === "hate");
+      runs.forEach(run => {
+        const textCtx = run.overlay_text || run.ocr_text || run.transcript;
+        const truncatedText = textCtx ? (textCtx.length > 80 ? textCtx.slice(0, 80) + "..." : textCtx) : "N/A";
+        list.push({
+          id: run.id,
+          timestamp: new Date(run.timestamp),
+          title: "Hate Speech Flagged",
+          details: `Analyst detected category "${run.category}" (risk score ${run.risk_score.toFixed(2)}). Content flagged: "${truncatedText}"`,
+          impact: "Negative",
+          impactColor: "bg-rose-50 text-rose-800 border border-rose-100",
+          iconBg: "bg-rose-50 text-rose-600"
+        });
+      });
+
+      const sessions = (backendData.socratic_sessions || [])
+        .filter(s => s.child_age === activePersona.age);
+      sessions.forEach(sess => {
+        const latestTurn = sess.turns && sess.turns.length > 0 ? sess.turns[sess.turns.length - 1] : null;
+        const currentEmotion = latestTurn ? latestTurn.child_emotion : "neutral";
+        const currentPhase = latestTurn ? latestTurn.current_phase : "Acknowledge";
+
+        let impact = "Neutral";
+        let impactColor = "bg-orange-50 text-orange-800 border border-orange-100";
+        const emoLower = currentEmotion.toLowerCase();
+        if (["resolved", "compliant", "happy"].includes(emoLower)) {
+          impact = "Positive";
+          impactColor = "bg-emerald-50 text-emerald-800 border border-emerald-100";
+        } else if (["reflective", "curious"].includes(emoLower)) {
+          impact = "Favorable";
+          impactColor = "bg-emerald-50 text-emerald-800 border border-emerald-100";
+        } else if (["scared", "defensive"].includes(emoLower)) {
+          impact = "Negative";
+          impactColor = "bg-rose-50 text-rose-800 border border-rose-100";
+        } else if (["frustrated", "angry"].includes(emoLower)) {
+          impact = "Very Negative";
+          impactColor = "bg-rose-50 text-rose-800 border border-rose-100";
+        }
+
+        list.push({
+          id: `xai-${sess.session_id}`,
+          timestamp: new Date(sess.timestamp),
+          title: "Socratic Safety Intercept",
+          details: `Socratic agent intercepted a "${sess.threat_type}" threat. Session status: "${sess.completed ? 'Completed' : 'Active Dialog'}" in phase "${currentPhase}". Child response emotional index: "${currentEmotion}".`,
+          impact: impact,
+          impactColor: impactColor,
+          iconBg: "bg-orange-50 text-orange-600"
+        });
+      });
+    }
+
+    list.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    return list.length > 0 ? list.slice(0, 3) : null;
+  };
+
+  const explainableAI = getExplainableAI();
+
+  // Dynamic Suggestion Banner Recommendations
+  const getAIRecommendation = () => {
+    let base = activePersona.age <= 10
+      ? "Limit violent video content exposure to less than 15 mins daily. Socratic dialogue suggests Sandeep is highly receptive to boundaries when discussed in a supportive tone. Encourage early bedroom screens curfew at 9:30 PM."
+      : "Discuss social circle dynamic on Discord. Young adult exhibits stress response (Elevated Anomaly Index) following late night gaming. Pivot safety agreements collaboratively rather than executing strict lockouts.";
+
+    if (backendAvailable && backendData) {
+      const sessions = (backendData.socratic_sessions || [])
+        .filter(s => s.child_age === activePersona.age);
+      const allEmotions: string[] = [];
+      sessions.forEach(s => {
+        (s.turns || []).forEach((t: any) => {
+          if (t.child_emotion) allEmotions.push(t.child_emotion.toLowerCase());
+        });
+      });
+
+      if (allEmotions.includes("frustrated") || allEmotions.includes("defensive")) {
+        base += " Note: Recent Socratic interactions show signs of frustration or defensive behavior. It is recommended to approach boundaries gently without direct confrontation.";
+      } else if (allEmotions.includes("resolved") || allEmotions.includes("compliant")) {
+        base += " Note: Dialogue history shows positive boundary compliance and resolution. Cognitive scaffolding is working effectively.";
+      }
+    }
+    return base;
   };
 
   const metrics = getMetrics();
@@ -353,11 +673,11 @@ export default function ParentDashboard() {
 
           {/* Bottom Connection Status & Back Button */}
           <div className="flex flex-col gap-3 mt-6 pt-5 border-t border-[#DDE0D0]">
-            <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-200 flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <div className="text-[10px] text-emerald-800 leading-tight">
-                <p className="font-bold">System Connected</p>
-                <p className="opacity-80">100% Offline Mode</p>
+            <div className={backendAvailable ? "p-3 bg-emerald-50 rounded-lg border border-emerald-200 flex items-center gap-2 text-emerald-800" : "p-3 bg-amber-50 rounded-lg border border-amber-200 flex items-center gap-2 text-amber-800"}>
+              <div className={backendAvailable ? "w-2 h-2 rounded-full bg-emerald-500 animate-pulse" : "w-2 h-2 rounded-full bg-amber-500 animate-pulse"} />
+              <div className="text-[10px] leading-tight">
+                <p className="font-bold">{backendAvailable ? "System Connected" : "System Offline"}</p>
+                <p className="opacity-80">{backendAvailable ? "100% Offline Mode" : "Running on Fallback Demo Data"}</p>
               </div>
             </div>
 
@@ -599,40 +919,55 @@ export default function ParentDashboard() {
 
                         {/* SVG Line path & points */}
                         <svg className="w-full h-full pl-12 overflow-visible" viewBox="0 0 300 160" preserveAspectRatio="none">
-                          {/* Guideline path */}
-                          <path
-                            d={
-                              activePersona.age <= 10
-                                ? "M 10 30 L 58 10 L 106 30 L 154 130 L 202 90 L 250 10 L 290 30"
-                                : "M 10 90 L 58 70 L 106 90 L 154 130 L 202 110 L 250 50 L 290 90"
-                            }
-                            fill="none"
-                            stroke="#5A5A40"
-                            strokeWidth="2.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          
-                          {/* Points */}
-                          {activePersona.age <= 10 ? (
+                          {emotionTrend ? (
                             <>
-                              <circle cx="10" cy="30" r="4.5" fill="#10B981" />
-                              <circle cx="58" cy="10" r="4.5" fill="#10B981" />
-                              <circle cx="106" cy="30" r="4.5" fill="#10B981" />
-                              <circle cx="154" cy="130" r="4.5" fill="#F43F5E" />
-                              <circle cx="202" cy="90" r="4.5" fill="#F59E0B" />
-                              <circle cx="250" cy="10" r="4.5" fill="#10B981" />
-                              <circle cx="290" cy="30" r="4.5" fill="#10B981" />
+                              <path
+                                d={emotionTrend.pathD}
+                                fill="none"
+                                stroke="#5A5A40"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                              {emotionTrend.points.map((pt, idx) => (
+                                <circle key={idx} cx={pt.x} cy={pt.y} r="4.5" fill={pt.color} />
+                              ))}
                             </>
                           ) : (
                             <>
-                              <circle cx="10" cy="90" r="4.5" fill="#F59E0B" />
-                              <circle cx="58" cy="70" r="4.5" fill="#10B981" />
-                              <circle cx="106" cy="90" r="4.5" fill="#F59E0B" />
-                              <circle cx="154" cy="130" r="4.5" fill="#F43F5E" />
-                              <circle cx="202" cy="110" r="4.5" fill="#F59E0B" />
-                              <circle cx="250" cy="50" r="4.5" fill="#10B981" />
-                              <circle cx="290" cy="90" r="4.5" fill="#F59E0B" />
+                              <path
+                                d={
+                                  activePersona.age <= 10
+                                    ? "M 10 30 L 58 10 L 106 30 L 154 130 L 202 90 L 250 10 L 290 30"
+                                    : "M 10 90 L 58 70 L 106 90 L 154 130 L 202 110 L 250 50 L 290 90"
+                                }
+                                fill="none"
+                                stroke="#5A5A40"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                              {activePersona.age <= 10 ? (
+                                <>
+                                  <circle cx="10" cy="30" r="4.5" fill="#10B981" />
+                                  <circle cx="58" cy="10" r="4.5" fill="#10B981" />
+                                  <circle cx="106" cy="30" r="4.5" fill="#10B981" />
+                                  <circle cx="154" cy="130" r="4.5" fill="#F43F5E" />
+                                  <circle cx="202" cy="90" r="4.5" fill="#F59E0B" />
+                                  <circle cx="250" cy="10" r="4.5" fill="#10B981" />
+                                  <circle cx="290" cy="30" r="4.5" fill="#10B981" />
+                                </>
+                              ) : (
+                                <>
+                                  <circle cx="10" cy="90" r="4.5" fill="#F59E0B" />
+                                  <circle cx="58" cy="70" r="4.5" fill="#10B981" />
+                                  <circle cx="106" cy="90" r="4.5" fill="#F59E0B" />
+                                  <circle cx="154" cy="130" r="4.5" fill="#F43F5E" />
+                                  <circle cx="202" cy="110" r="4.5" fill="#F59E0B" />
+                                  <circle cx="250" cy="50" r="4.5" fill="#10B981" />
+                                  <circle cx="290" cy="90" r="4.5" fill="#F59E0B" />
+                                </>
+                              )}
                             </>
                           )}
                         </svg>
@@ -640,13 +975,21 @@ export default function ParentDashboard() {
 
                       {/* X-axis Labels */}
                       <div className="flex justify-between pl-12 text-[10px] text-[#6B705C] font-semibold mt-2">
-                        <span>6 Aug</span>
-                        <span>7 Aug</span>
-                        <span>8 Aug</span>
-                        <span>9 Aug</span>
-                        <span>10 Aug</span>
-                        <span>11 Aug</span>
-                        <span>12 Aug</span>
+                        {emotionTrend ? (
+                          emotionTrend.points.map((pt, idx) => (
+                            <span key={idx}>{pt.timeStr}</span>
+                          ))
+                        ) : (
+                          <>
+                            <span>6 Aug</span>
+                            <span>7 Aug</span>
+                            <span>8 Aug</span>
+                            <span>9 Aug</span>
+                            <span>10 Aug</span>
+                            <span>11 Aug</span>
+                            <span>12 Aug</span>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -747,69 +1090,94 @@ export default function ParentDashboard() {
 
                     {/* Explanations List */}
                     <div className="flex flex-col gap-3">
-                      
-                      {/* Item 1 */}
-                      <div className="p-3 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex items-start justify-between gap-3 text-xs">
-                        <div className="flex items-start gap-3">
-                          <div className="p-1.5 bg-rose-50 border border-rose-200 text-rose-600 rounded-lg mt-0.5">
-                            <AlertTriangle className="w-4 h-4" />
+                      {explainableAI ? (
+                        explainableAI.map((item) => (
+                          <div key={item.id} className="p-3 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex items-start justify-between gap-3 text-xs">
+                            <div className="flex items-start gap-3">
+                              <div className={`p-1.5 border rounded-lg mt-0.5 ${item.iconBg}`}>
+                                <AlertTriangle className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-[#2D3025]">{item.title}</h4>
+                                <p className="text-[#6B705C] mt-0.5 leading-relaxed">
+                                  {item.details}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[10px] text-[#6B705C] font-medium">Impact on Emotion</p>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded block mt-1 ${item.impactColor}`}>
+                                {item.impact}
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="font-bold text-[#2D3025]">Violent Video Detected</h4>
-                            <p className="text-[#6B705C] mt-0.5 leading-relaxed">
-                              A violent gameplay match was played on YouTube Desktop app at 8:15 PM.
-                            </p>
+                        ))
+                      ) : (
+                        <>
+                          {/* Item 1 */}
+                          <div className="p-3 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex items-start justify-between gap-3 text-xs">
+                            <div className="flex items-start gap-3">
+                              <div className="p-1.5 bg-rose-50 border border-rose-200 text-rose-600 rounded-lg mt-0.5">
+                                <AlertTriangle className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-[#2D3025]">Violent Video Detected</h4>
+                                <p className="text-[#6B705C] mt-0.5 leading-relaxed">
+                                  A violent gameplay match was played on YouTube Desktop app at 8:15 PM.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[10px] text-[#6B705C] font-medium">Impact on Emotion</p>
+                              <span className="bg-rose-50 text-rose-800 border border-rose-100 text-[10px] font-bold px-1.5 py-0.5 rounded block mt-1">
+                                Very Negative
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-[10px] text-[#6B705C] font-medium">Impact on Emotion</p>
-                          <span className="bg-rose-50 text-rose-800 border border-rose-100 text-[10px] font-bold px-1.5 py-0.5 rounded block mt-1">
-                            Very Negative
-                          </span>
-                        </div>
-                      </div>
 
-                      {/* Item 2 */}
-                      <div className="p-3 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex items-start justify-between gap-3 text-xs">
-                        <div className="flex items-start gap-3">
-                          <div className="p-1.5 bg-orange-50 border border-orange-200 text-orange-600 rounded-lg mt-0.5">
-                            <HelpCircle className="w-4 h-4" />
+                          {/* Item 2 */}
+                          <div className="p-3 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex items-start justify-between gap-3 text-xs">
+                            <div className="flex items-start gap-3">
+                              <div className="p-1.5 bg-orange-50 border border-orange-200 text-orange-600 rounded-lg mt-0.5">
+                                <HelpCircle className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-[#2D3025]">Hate Speech Content</h4>
+                                <p className="text-[#6B705C] mt-0.5 leading-relaxed">
+                                  Toxic verbal interaction and hate speech words detected in Discord text channel at 7:40 PM.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[10px] text-[#6B705C] font-medium">Impact on Emotion</p>
+                              <span className="bg-orange-50 text-orange-800 border border-orange-100 text-[10px] font-bold px-1.5 py-0.5 rounded block mt-1">
+                                Negative
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="font-bold text-[#2D3025]">Hate Speech Content</h4>
-                            <p className="text-[#6B705C] mt-0.5 leading-relaxed">
-                              Toxic verbal interaction and hate speech words detected in Discord text channel at 7:40 PM.
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-[10px] text-[#6B705C] font-medium">Impact on Emotion</p>
-                          <span className="bg-orange-50 text-orange-800 border border-orange-100 text-[10px] font-bold px-1.5 py-0.5 rounded block mt-1">
-                            Negative
-                          </span>
-                        </div>
-                      </div>
 
-                      {/* Item 3 */}
-                      <div className="p-3 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex items-start justify-between gap-3 text-xs">
-                        <div className="flex items-start gap-3">
-                          <div className="p-1.5 bg-purple-50 border border-purple-200 text-purple-600 rounded-lg mt-0.5">
-                            <Clock className="w-4 h-4" />
+                          {/* Item 3 */}
+                          <div className="p-3 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex items-start justify-between gap-3 text-xs">
+                            <div className="flex items-start gap-3">
+                              <div className="p-1.5 bg-purple-50 border border-purple-200 text-purple-600 rounded-lg mt-0.5">
+                                <Clock className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-[#2D3025]">Late Night Screen Activity</h4>
+                                <p className="text-[#6B705C] mt-0.5 leading-relaxed">
+                                  Device usage detected after safe limits boundary (10:30 PM) on {activePersona.name}&apos;s Desktop.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[10px] text-[#6B705C] font-medium">Impact on Emotion</p>
+                              <span className="bg-orange-50 text-orange-800 border border-orange-100 text-[10px] font-bold px-1.5 py-0.5 rounded block mt-1">
+                                Negative
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="font-bold text-[#2D3025]">Late Night Screen Activity</h4>
-                            <p className="text-[#6B705C] mt-0.5 leading-relaxed">
-                              Device usage detected after safe limits boundary (10:30 PM) on {activePersona.name}&apos;s Desktop.
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="text-[10px] text-[#6B705C] font-medium">Impact on Emotion</p>
-                          <span className="bg-orange-50 text-orange-800 border border-orange-100 text-[10px] font-bold px-1.5 py-0.5 rounded block mt-1">
-                            Negative
-                          </span>
-                        </div>
-                      </div>
+                        </>
+                      )}
 
                       {/* Parent Suggestion Banner */}
                       <div className="p-4 bg-[#E6D5C3]/20 border border-[#DDE0D0] rounded-lg flex items-start gap-3.5 mt-2">
@@ -817,11 +1185,7 @@ export default function ParentDashboard() {
                         <div className="text-xs">
                           <h4 className="font-bold text-[#5A5A40] uppercase tracking-wide text-[10px]">AI Assistant Recommendation</h4>
                           <p className="text-[#2D3025] mt-1 font-medium leading-relaxed">
-                            {activePersona.age <= 10 ? (
-                              "Limit violent video content exposure to less than 15 mins daily. Socratic dialogue suggests Sandeep is highly receptive to boundaries when discussed in a supportive tone. Encourage early bedroom screens curfew at 9:30 PM."
-                            ) : (
-                              "Discuss social circle dynamic on Discord. Young adult exhibits stress response (Elevated Anomaly Index) following late night gaming. Pivot safety agreements collaboratively rather than executing strict lockouts."
-                            )}
+                            {getAIRecommendation()}
                           </p>
                         </div>
                       </div>
@@ -841,102 +1205,124 @@ export default function ParentDashboard() {
                     </div>
 
                     <div className="flex flex-col gap-2.5">
-                      
-                      {/* Log 1 */}
-                      <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
-                        <div className="flex items-center gap-3">
-                          <div className="p-1.5 bg-rose-50 text-rose-600 rounded">
-                            <AlertTriangle className="w-3.5 h-3.5" />
+                      {recentAlerts ? (
+                        recentAlerts.map((alert) => (
+                          <div key={alert.id} className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
+                            <div className="flex items-center gap-3">
+                              <div className={`p-1.5 rounded ${alert.iconBg}`}>
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-[#2D3025]">{alert.title}</p>
+                                <p className="text-[10px] text-[#6B705C]">{alert.app}</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-[#6B705C] font-mono">{alert.timeStr}</p>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded inline-block mt-0.5 ${alert.severityColor}`}>
+                                {alert.severity}
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-[#2D3025]">Violent Video Detected</p>
-                            <p className="text-[10px] text-[#6B705C]">YouTube Desktop</p>
+                        ))
+                      ) : (
+                        <>
+                          {/* Log 1 */}
+                          <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
+                            <div className="flex items-center gap-3">
+                              <div className="p-1.5 bg-rose-50 text-rose-600 rounded">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-[#2D3025]">Violent Video Detected</p>
+                                <p className="text-[10px] text-[#6B705C]">YouTube Desktop</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-[#6B705C] font-mono">9:21 PM</p>
+                              <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded border border-rose-100 inline-block mt-0.5">
+                                High
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-[#6B705C] font-mono">9:21 PM</p>
-                          <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded border border-rose-100 inline-block mt-0.5">
-                            High
-                          </span>
-                        </div>
-                      </div>
 
-                      {/* Log 2 */}
-                      <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
-                        <div className="flex items-center gap-3">
-                          <div className="p-1.5 bg-rose-50 text-rose-600 rounded">
-                            <AlertTriangle className="w-3.5 h-3.5" />
+                          {/* Log 2 */}
+                          <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
+                            <div className="flex items-center gap-3">
+                              <div className="p-1.5 bg-rose-50 text-rose-600 rounded">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-[#2D3025]">Hate Speech Content</p>
+                                <p className="text-[10px] text-[#6B705C]">Discord App</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-[#6B705C] font-mono">8:45 PM</p>
+                              <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded border border-rose-100 inline-block mt-0.5">
+                                High
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-[#2D3025]">Hate Speech Content</p>
-                            <p className="text-[10px] text-[#6B705C]">Discord App</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-[#6B705C] font-mono">8:45 PM</p>
-                          <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded border border-rose-100 inline-block mt-0.5">
-                            High
-                          </span>
-                        </div>
-                      </div>
 
-                      {/* Log 3 */}
-                      <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
-                        <div className="flex items-center gap-3">
-                          <div className="p-1.5 bg-purple-50 text-purple-600 rounded">
-                            <Monitor className="w-3.5 h-3.5" />
+                          {/* Log 3 */}
+                          <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
+                            <div className="flex items-center gap-3">
+                              <div className="p-1.5 bg-purple-50 text-purple-600 rounded">
+                                <Monitor className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-[#2D3025]">Adult Content Blocked</p>
+                                <p className="text-[10px] text-[#6B705C]">Website Browser</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-[#6B705C] font-mono">7:30 PM</p>
+                              <span className="text-[9px] bg-purple-50 text-purple-700 font-bold px-1.5 py-0.5 rounded border border-purple-100 inline-block mt-0.5">
+                                Medium
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-[#2D3025]">Adult Content Blocked</p>
-                            <p className="text-[10px] text-[#6B705C]">Website Browser</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-[#6B705C] font-mono">7:30 PM</p>
-                          <span className="text-[9px] bg-purple-50 text-purple-700 font-bold px-1.5 py-0.5 rounded border border-purple-100 inline-block mt-0.5">
-                            Medium
-                          </span>
-                        </div>
-                      </div>
 
-                      {/* Log 4 */}
-                      <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
-                        <div className="flex items-center gap-3">
-                          <div className="p-1.5 bg-rose-50 text-rose-600 rounded">
-                            <AlertTriangle className="w-3.5 h-3.5" />
+                          {/* Log 4 */}
+                          <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
+                            <div className="flex items-center gap-3">
+                              <div className="p-1.5 bg-rose-50 text-rose-600 rounded">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-[#2D3025]">Extreme Battle Video</p>
+                                <p className="text-[10px] text-[#6B705C]">USB Drive Playback</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-[#6B705C] font-mono">6:15 PM</p>
+                              <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded border border-rose-100 inline-block mt-0.5">
+                                High
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-[#2D3025]">Extreme Battle Video</p>
-                            <p className="text-[10px] text-[#6B705C]">USB Drive Playback</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-[#6B705C] font-mono">6:15 PM</p>
-                          <span className="text-[9px] bg-rose-50 text-rose-700 font-bold px-1.5 py-0.5 rounded border border-rose-100 inline-block mt-0.5">
-                            High
-                          </span>
-                        </div>
-                      </div>
 
-                      {/* Log 5 */}
-                      <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
-                        <div className="flex items-center gap-3">
-                          <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded">
-                            <CheckCircle className="w-3.5 h-3.5" />
+                          {/* Log 5 */}
+                          <div className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] rounded-lg transition border border-transparent hover:border-[#DDE0D0]">
+                            <div className="flex items-center gap-3">
+                              <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded">
+                                <CheckCircle className="w-3.5 h-3.5" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-[#2D3025]">Controversial Rant</p>
+                                <p className="text-[10px] text-[#6B705C]">Social Media App</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-[#6B705C] font-mono">5:02 PM</p>
+                              <span className="text-[9px] bg-emerald-50 text-emerald-800 font-bold px-1.5 py-0.5 rounded border border-emerald-100 inline-block mt-0.5">
+                                Low
+                              </span>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-[#2D3025]">Controversial Rant</p>
-                            <p className="text-[10px] text-[#6B705C]">Social Media App</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-[#6B705C] font-mono">5:02 PM</p>
-                          <span className="text-[9px] bg-emerald-50 text-emerald-800 font-bold px-1.5 py-0.5 rounded border border-emerald-100 inline-block mt-0.5">
-                            Low
-                          </span>
-                        </div>
-                      </div>
-
+                        </>
+                      )}
                     </div>
                   </div>
 
