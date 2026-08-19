@@ -12,3 +12,4 @@ offline_backend/models/*.onnx
 offline_backend/models/*.bin
 offline_backend/models/*.pt
 
+offline_backend/dashboard_history.json

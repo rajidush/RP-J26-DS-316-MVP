@@ -6,6 +6,8 @@ from typing import Optional
 from socratic_agent import SocraticAgentManager
 from analyst.pipeline import get_pipeline
 from analyst.schema import AnalystHealth, AnalystResult
+import dashboard_store
+
 
 app = FastAPI(
     title="Socratic Digital Child Safety Engine",
@@ -91,13 +93,26 @@ async def analyst_analyze(
 
     grab = capture_screen.strip().lower() in ("1", "true", "yes")
     try:
-        return get_pipeline().analyze(
+        res = get_pipeline().analyze(
             child_age=child_age,
             overlay_text=overlay_text,
             image_bytes=image_bytes,
             audio_bytes=audio_bytes,
             capture_screen=grab,
         )
+        # Record analyst run for Parent Dashboard
+        dashboard_store.add_analyst_run(
+            child_age=res.child_age,
+            decision=res.decision,
+            risk_score=res.risk_score,
+            category=res.category,
+            ocr_text=res.ocr_text,
+            transcript=res.transcript,
+            overlay_text=res.overlay_text,
+            source=res.source,
+            session_hint=res.session_hint
+        )
+        return res
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Analyst failure: {exc}") from exc
 
@@ -147,6 +162,13 @@ def trigger_threat(payload: ThreatTriggerRequest):
         threat_type=threat_type
     )
 
+    # Record Socratic session start for Parent Dashboard
+    dashboard_store.add_socratic_session_start(
+        session_id=session_id,
+        child_age=payload.child_age,
+        threat_type=threat_type
+    )
+
     # 3. Create the initial intervention message matching Socratic State
     # Acknowledge: First contact.
     if payload.child_age <= 10:
@@ -162,6 +184,17 @@ def trigger_threat(payload: ThreatTriggerRequest):
         "agreed_to_boundary": False
     }
     session_state["history"].append({"role": "assistant", "content": json.dumps(initial_payload)})
+
+    # Record the initial assistant greeting as the first turn in the store
+    dashboard_store.add_socratic_turn(
+        session_id=session_id,
+        child_response="",
+        socratic_response_to_child=initial_question,
+        child_emotion="neutral",
+        agreed_to_boundary=False,
+        current_phase="Acknowledge",
+        completed=False
+    )
 
     return ThreatTriggerResponse(
         threat_detected=True,
@@ -196,6 +229,16 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
             session_id=payload.session_id,
             child_response=payload.child_response
         )
+        # Record turn for Parent Dashboard
+        dashboard_store.add_socratic_turn(
+            session_id=payload.session_id,
+            child_response=payload.child_response,
+            socratic_response_to_child=result["socratic_response_to_child"],
+            child_emotion=result["child_emotion"],
+            agreed_to_boundary=result["agreed_to_boundary"],
+            current_phase=result["state_info"]["next_phase"],
+            completed=result["state_info"]["completed"]
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Socratic loop failure: {str(e)}")
 
@@ -206,6 +249,14 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
         current_phase=result["state_info"]["next_phase"],
         completed=result["state_info"]["completed"]
     )
+
+@app.get("/api/parent/dashboard-data")
+def get_parent_dashboard_data():
+    """Returns all logged parent dashboard metrics, logs and history."""
+    try:
+        return dashboard_store.get_dashboard_data()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve dashboard history: {e}")
 
 if __name__ == "__main__":
     import uvicorn

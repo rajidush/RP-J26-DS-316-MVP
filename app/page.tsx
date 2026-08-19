@@ -738,7 +738,7 @@ export default function SocraticPrototype() {
 
                 {/* Simulate Button */}
                 <button
-                  onClick={handleTriggerIntercept}
+                  onClick={() => handleTriggerIntercept()}
                   className="w-full py-3 px-4 bg-[#5A5A40] hover:bg-[#454530] text-white font-medium rounded-lg shadow-md flex items-center justify-center gap-2 transition duration-200"
                   id="btn-trigger-intercept"
                 >
