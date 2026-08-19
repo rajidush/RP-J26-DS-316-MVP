@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from analyst.asr import AsrEngine
 from analyst.buffer import TransientMediaBuffer
 from analyst.lexicon import score_text
 from analyst.pipeline import AnalystPipeline, fuse
@@ -65,6 +66,20 @@ class PipelineTests(unittest.TestCase):
         result = self.pipe.analyze(child_age=8)
         self.assertEqual(result.decision, "not-hate")
         self.assertIn("no_media_or_text", result.notes)
+
+    def test_audio_only_hate_via_asr(self):
+        self.pipe.asr = AsrEngine(transcribe_fn=lambda _b: "you should kys")
+        result = self.pipe.analyze(child_age=10, audio_bytes=b"RIFF....fake")
+        self.assertEqual(result.decision, "hate")
+        self.assertTrue(result.source["asr"])
+        self.assertEqual(result.transcript, "you should kys")
+        self.assertTrue(result.media_deleted)
+
+    def test_audio_clean_gaming_via_asr(self):
+        self.pipe.asr = AsrEngine(transcribe_fn=lambda _b: "gg ez noob")
+        result = self.pipe.analyze(child_age=10, audio_bytes=b"RIFF....fake")
+        self.assertEqual(result.decision, "not-hate")
+        self.assertFalse(result.escalated)
 
     def test_fusion_meme_bump(self):
         bumped = fuse(0.50, 0.50)
