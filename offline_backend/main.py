@@ -18,6 +18,7 @@ app = FastAPI(
 # Enable CORS for frontend web and Electron integration
 app.add_middleware(
     CORSMiddleware,
+    allow_origin_regex=r".*",
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
