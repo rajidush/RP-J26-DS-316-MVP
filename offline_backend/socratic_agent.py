@@ -1,3 +1,4 @@
+import os
 import json
 from typing import List, Dict, Optional, Tuple
 from openai import OpenAI
@@ -19,10 +20,18 @@ class SocraticResponse(BaseModel):
     )
 
 class SocraticAgentManager:
-    def __init__(self, base_url: str = "http://localhost:1234/v1", api_key: str = "lm-studio"):
+    def __init__(
+        self, 
+        base_url: str = "http://localhost:1234/v1", 
+        api_key: str = "lm-studio",
+        model_name: Optional[str] = None
+    ):
         """
         Initializes the offline Socratic agent using the OpenAI library pointing to LM Studio.
         """
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model_name = model_name or os.getenv("LM_STUDIO_MODEL", "google/gemma-3-1b")
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         # Dictionary to store active child sessions: session_id -> session_data
         self.sessions: Dict[str, dict] = {}
@@ -109,14 +118,44 @@ class SocraticAgentManager:
         )
         return system_prompt
 
-    def _slide_window_memory(self, history: List[Dict], max_turns: int = 4) -> List[Dict]:
+    def _format_messages_for_llm(self, system_prompt: str, history: List[Dict], threat_type: str, max_turns: int = 4) -> List[Dict]:
         """
-        Sliding Window Memory Manager: Keeps only the last N rounds of user-assistant turns.
-        This prevents context amnesia / hallucination in small 1B-3B parameters models.
+        Formats and sanitizes conversation history for strict Jinja template engines (e.g. Gemma 3, Llama 3).
+        Guarantees:
+        1. Conversation starts with a 'user' message after system prompt.
+        2. Strict alternation of roles: user -> assistant -> user -> assistant ...
+        3. Avoids consecutive duplicate roles by merging contents.
         """
-        # A turn consists of 1 user message and 1 assistant message.
-        # So we keep the last (max_turns * 2) messages.
-        return history[-(max_turns * 2):] if len(history) > (max_turns * 2) else history
+        # 1. Slide window memory (last max_turns rounds = max_turns * 2 messages)
+        raw_slice = history[-(max_turns * 2):] if len(history) > (max_turns * 2) else list(history)
+
+        # 2. Ensure the slice starts with a 'user' message
+        while raw_slice and raw_slice[0].get("role") != "user":
+            raw_slice.pop(0)
+
+        # If empty, seed with the initial intercept context
+        if not raw_slice:
+            raw_slice = [{"role": "user", "content": f"[Safety Interceptor Alert]: Potential {threat_type} threat detected on screen."}]
+
+        # 3. Deduplicate consecutive identical roles
+        clean_history = []
+        for msg in raw_slice:
+            role = msg.get("role", "user")
+            content = str(msg.get("content", "")).strip()
+            if not content:
+                continue
+
+            if clean_history and clean_history[-1]["role"] == role:
+                clean_history[-1]["content"] += f"\n{content}"
+            else:
+                clean_history.append({"role": role, "content": content})
+
+        # Ensure first message is user
+        if not clean_history or clean_history[0]["role"] != "user":
+            clean_history.insert(0, {"role": "user", "content": f"[Safety Interceptor Alert]: Potential {threat_type} threat detected on screen."})
+
+        # Prepend system prompt
+        return [{"role": "system", "content": system_prompt}] + clean_history
 
     def execute_turn(self, session_id: str, child_response: str) -> Tuple[dict, dict]:
         """
@@ -130,52 +169,95 @@ class SocraticAgentManager:
         # 1. Update/Append Child Response to History
         session["history"].append({"role": "user", "content": child_response})
 
-        # 2. Memory Trim (Sliding Window) to protect 1B model's attention
-        trimmed_history = self._slide_window_memory(session["history"], max_turns=4)
-
-        # 3. Dynamic System Prompt Generation based on Age, Threat, and active State Phase
+        # 2. Dynamic System Prompt Generation based on Age, Threat, and active State Phase
         system_prompt = self._get_system_prompt(
             child_age=session["child_age"],
             threat_type=session["threat_type"],
             current_phase=session["current_phase"]
         )
 
-        # Combine System Prompt with sliding window history
-        messages = [{"role": "system", "content": system_prompt}] + trimmed_history
+        # 3. Format message history for strict Jinja template compatibility (Gemma 3)
+        messages = self._format_messages_for_llm(
+            system_prompt=system_prompt,
+            history=session["history"],
+            threat_type=session["threat_type"],
+            max_turns=4
+        )
 
-        # 4. Call Local SLM with low temperature for deterministic behavior
+        # 4. Call Local SLM with multi-tier fallback for local engine resilience
+        raw_content = ""
         try:
-            response = self.client.chat.completions.create(
-                model="local-model",  # In LM Studio, 'local-model' maps to the loaded SLM
-                messages=messages,
-                temperature=0.2,      # Fixed low temperature to enforce state constraints and prevent drift
-                response_format={"type": "json_object"}  # Forces JSON mode if SLM supports it
-            )
+            try:
+                # Primary attempt: low temperature with JSON schema constraint
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=0.2,
+                    response_format={"type": "json_object"}
+                )
+            except Exception:
+                try:
+                    # Retry Tier 1: without response_format if grammar sampling is unsupported
+                    response = self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=messages,
+                        temperature=0.2
+                    )
+                except Exception:
+                    # Retry Tier 2: merge system prompt into first user turn for models rejecting system role
+                    merged_messages = []
+                    sys_text = system_prompt
+                    for msg in messages:
+                        if msg["role"] == "system":
+                            continue
+                        if msg["role"] == "user" and sys_text:
+                            merged_messages.append({
+                                "role": "user",
+                                "content": f"{sys_text}\n\n{msg['content']}"
+                            })
+                            sys_text = ""
+                        else:
+                            merged_messages.append(msg)
+
+                    response = self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=merged_messages,
+                        temperature=0.2
+                    )
+
             raw_content = response.choices[0].message.content.strip()
         except Exception as e:
-            # Fallback for offline resilience if LM Studio connection fails
+            # Fallback for offline resilience if LM Studio connection completely fails
             raw_content = self._get_fallback_response(session, child_response, str(e))
 
         # 5. Safe Parse JSON Structure
+        socratic_text = ""
+        child_emotion = "reflective"
+        agreed = False
+
         try:
-            # Strip any markdown code blocks if the SLM accidentally emitted them
-            clean_json = raw_content
-            if clean_json.startswith("```json"):
+            clean_json = raw_content.strip()
+            if "```json" in clean_json:
                 clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-            elif clean_json.startswith("```"):
+            elif "```" in clean_json:
                 clean_json = clean_json.split("```")[1].split("```")[0].strip()
-            
+
+            if "{" in clean_json and "}" in clean_json:
+                first_brace = clean_json.find("{")
+                last_brace = clean_json.rfind("}")
+                clean_json = clean_json[first_brace:last_brace + 1]
+
             parsed_output = json.loads(clean_json)
             socratic_text = parsed_output.get("socratic_response_to_child", "")
-            child_emotion = parsed_output.get("child_emotion", "unknown")
-            agreed = parsed_output.get("agreed_to_boundary", False)
+            child_emotion = parsed_output.get("child_emotion", "reflective")
+            agreed = bool(parsed_output.get("agreed_to_boundary", False))
         except Exception:
-            # Regex or basic string fallback if JSON parsing failed completely
             socratic_text = raw_content
-            child_emotion = "unclear"
-            agreed = False
-            if "agree" in child_response.lower() or "ok" in child_response.lower() or "yes" in child_response.lower():
-                agreed = True
+            child_emotion = "reflective"
+            agreed = any(w in child_response.lower() for w in ["agree", "ok", "yes", "deal", "sure", "close"])
+
+        if not socratic_text:
+            socratic_text = raw_content or "Let's talk through what happened on your screen."
 
         # 6. Update Socratic State Machine Phase Progression (Deterministic Transition)
         previous_phase = session["current_phase"]
