@@ -52,7 +52,10 @@ class SocraticResponse(BaseModel):
     )
 
 class SocraticAgentManager:
-    def __init__(self, base_url: str = "http://localhost:1234/v1", api_key: str = "lm-studio"):
+    def __init__(self, base_url: str = "http://localhost:1234/v1", api_key: str = "lm-studio", model_name: str = "google/gemma-3-1b"):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model_name = model_name
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.sessions: Dict[str, dict] = {}
 
@@ -152,7 +155,7 @@ class SocraticAgentManager:
 
         try:
             response = self.client.chat.completions.create(
-                model="local-model",
+                model=self.model_name,
                 messages=messages,
                 temperature=0.2,
                 response_format={"type": "json_object"}
@@ -316,7 +319,7 @@ This system executes a Socratic dialogue to safely scaffold kids away from harmf
 
 ## Quickstart
 
-1. Launch LM Studio, download and load **Llama-3.2-1B-Instruct**
+1. Launch LM Studio, download and load **google/gemma-3-1b** (or Llama-3.2-1B-Instruct)
 2. Enable "Local Server" inside LM Studio on port 1234
 3. Create venv, activate, and install packages:
    \`\`\`bash
@@ -1334,7 +1337,7 @@ export default function SocraticPrototype() {
                     <span>1.</span> Load Local Language Model
                   </h4>
                   <p className="text-[#6B705C] leading-relaxed">
-                    Download and open <strong>LM Studio</strong>. Search and load a model like <strong>Llama-3.2-1B-Instruct-Q8_0.gguf</strong>. Navigate to the local server tab, verify port is set to <code>1234</code>, and click <strong>Start Server</strong>.
+                    Download and open <strong>LM Studio</strong>. Search and load <strong>google/gemma-3-1b</strong> (or <strong>Llama-3.2-1B-Instruct</strong>). Navigate to the local server tab, verify port is set to <code>1234</code>, and click <strong>Start Server</strong>.
                   </p>
                 </div>
                 <div className="p-4 bg-white border border-[#DDE0D0] rounded-lg text-xs" id="guide-step-2">

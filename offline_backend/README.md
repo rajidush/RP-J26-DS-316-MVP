@@ -6,8 +6,8 @@ This is the offline Python backend (The Cognitive Engine) designed to run comple
 
 1. **Python 3.8 - 3.11** installed.
 2. **LM Studio** installed on your local computer.
-3. Download a Small Language Model (SLM) such as **Llama-3.2-1B-Instruct-Q8_0.gguf** via LM Studio.
-4. In LM Studio, click on the **Local Server** icon (left panel) and click **Start Server**. It runs on `http://localhost:1234` by default. Make sure your downloaded Llama-3.2 model is loaded into memory.
+3. Download a Small Language Model (SLM) such as **google/gemma-3-1b** (or **Llama-3.2-1B-Instruct**) via LM Studio.
+4. In LM Studio, click on the **Local Server** icon (left panel) and click **Start Server**. It runs on `http://localhost:1234` by default. Make sure your model (e.g. `google/gemma-3-1b`) is loaded into memory.
 
 ## Python Backend Setup
 

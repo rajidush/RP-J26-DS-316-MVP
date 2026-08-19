@@ -1,8 +1,9 @@
+import os
+import uuid
+from typing import Optional
 from fastapi import FastAPI, HTTPException, Body, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import uuid
-from typing import Optional
 from socratic_agent import SocraticAgentManager
 from analyst.pipeline import get_pipeline
 from analyst.schema import AnalystHealth, AnalystResult
@@ -25,7 +26,11 @@ app.add_middleware(
 
 # Initialize our Socratic agent core
 # Configured for default LM Studio local server on http://localhost:1234/v1
-agent_manager = SocraticAgentManager(base_url="http://localhost:1234/v1", api_key="lm-studio")
+agent_manager = SocraticAgentManager(
+    base_url=os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1"),
+    api_key=os.getenv("LM_STUDIO_API_KEY", "lm-studio"),
+    model_name=os.getenv("LM_STUDIO_MODEL", "google/gemma-3-1b")
+)
 
 # --- Schemas ---
 
@@ -61,7 +66,8 @@ def read_root():
     return {
         "status": "online",
         "system": "Socratic Buddy Child Safety Interceptor",
-        "engine_target": "LM Studio (http://localhost:1234/v1)",
+        "engine_target": f"LM Studio ({agent_manager.base_url})",
+        "model": agent_manager.model_name,
         "analyst": "http://127.0.0.1:8001/api/analyst/health",
     }
 
@@ -176,13 +182,17 @@ def trigger_threat(payload: ThreatTriggerRequest):
     else:
         initial_question = f"Hey. I've temporarily intercepted the screen because I detected material that looks like {threat_type.replace('_', ' ')}. Socratic Buddy is here to chat. How did you end up on this page?"
 
-    # Pre-populate history with the first assistant greeting to keep context intact
+    # Pre-populate history with the intercept event (user) and first assistant greeting
     import json
     initial_payload = {
         "socratic_response_to_child": initial_question,
         "child_emotion": "neutral",
         "agreed_to_boundary": False
     }
+    session_state["history"].append({
+        "role": "user",
+        "content": f"[Safety Interceptor Alert]: Potential {threat_type.replace('_', ' ')} threat detected on screen."
+    })
     session_state["history"].append({"role": "assistant", "content": json.dumps(initial_payload)})
 
     # Record the initial assistant greeting as the first turn in the store
