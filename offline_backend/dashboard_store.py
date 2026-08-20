@@ -111,4 +111,10 @@ def add_socratic_turn(
 
 def get_dashboard_data() -> dict:
     with lock:
-        return _load_history()
+        history = _load_history()
+        # Default keys for future compatibility
+        if "hate_speech_detected" not in history:
+            history["hate_speech_detected"] = {}
+        if "screen_time_minutes" not in history:
+            history["screen_time_minutes"] = {}
+        return history

@@ -227,9 +227,19 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
         raise HTTPException(status_code=404, detail="Socratic safety session not found or expired.")
 
     if session["completed"]:
+        last_emotion = "neutral"
+        data = dashboard_store.get_dashboard_data()
+        for s in data.get("socratic_sessions", []):
+            if s.get("session_id") == payload.session_id:
+                turns = s.get("turns", [])
+                for turn in reversed(turns):
+                    if turn.get("child_emotion"):
+                        last_emotion = turn["child_emotion"]
+                        break
+                break
         return DialogueTurnResponse(
             socratic_response_to_child="The safety boundary is active. This screen is securely closed.",
-            child_emotion="resolved",
+            child_emotion=last_emotion,
             agreed_to_boundary=True,
             current_phase="Contract",
             completed=True
@@ -262,10 +272,42 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
     )
 
 @app.get("/api/parent/dashboard-data")
-def get_parent_dashboard_data():
-    """Returns all logged parent dashboard metrics, logs and history."""
+def get_parent_dashboard_data(child_age: Optional[int] = None):
+    """Returns all logged parent dashboard metrics, logs and history, plus calculated summary card metrics."""
     try:
-        return dashboard_store.get_dashboard_data()
+        data = dashboard_store.get_dashboard_data()
+        
+        analyst_runs = data.get("analyst_runs", [])
+        socratic_sessions = data.get("socratic_sessions", [])
+        
+        # Filter by child_age if provided
+        if child_age is not None:
+            runs_filtered = [r for r in analyst_runs if r.get("child_age") == child_age]
+            sessions_filtered = [s for s in socratic_sessions if s.get("child_age") == child_age]
+            
+            hate_speech_dict = data.get("hate_speech_detected", {})
+            hate_speech_detected = hate_speech_dict.get(str(child_age), 0)
+            
+            screen_time_dict = data.get("screen_time_minutes", {})
+            screen_time_minutes = screen_time_dict.get(str(child_age), 0)
+        else:
+            runs_filtered = analyst_runs
+            sessions_filtered = socratic_sessions
+            
+            hate_speech_detected = sum(data.get("hate_speech_detected", {}).values())
+            screen_time_minutes = sum(data.get("screen_time_minutes", {}).values())
+            
+        content_intercepted = len(sessions_filtered)
+        high_severity_alerts = len([r for r in runs_filtered if r.get("decision") == "hate"])
+        
+        return {
+            "analyst_runs": analyst_runs,
+            "socratic_sessions": socratic_sessions,
+            "content_intercepted": content_intercepted,
+            "high_severity_alerts": high_severity_alerts,
+            "hate_speech_detected": hate_speech_detected,
+            "screen_time_minutes": screen_time_minutes
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve dashboard history: {e}")
 
