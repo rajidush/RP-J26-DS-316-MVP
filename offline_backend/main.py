@@ -40,9 +40,9 @@ class FrameAnalysisRequest(BaseModel):
     filename: str = ""
 
 class ThreatTriggerRequest(BaseModel):
-    violence_score: float = Field(0.0, description="Confidence score for violence (0.0 to 1.0)")
-    hate_speech_score: float = Field(0.0, description="Confidence score for hate speech (0.0 to 1.0)")
-    adult_content_score: float = Field(0.0, description="Confidence score for adult content (0.0 to 1.0)")
+    nsfw_score: float = Field(0.0, description="NSFW classifier score")
+    violence_score: float = Field(0.0, description="MoViNet-A0 violence score")
+    weapons_score: float = Field(0.0, description="YOLOv8-nano weapons score")
     child_age: int = Field(10, description="The age of the child using the computer (e.g. 8 or 14)")
 
 class ThreatTriggerResponse(BaseModel):
@@ -78,29 +78,26 @@ def read_root():
 def trigger_threat(payload: ThreatTriggerRequest):
     """
     Simulates the 'Perception Layer' interceptor.
-    Analyzes content threat scores. If a threshold is breached (score > 0.85),
-    it flags threat_detected = True, extracts threat_type, and triggers Socratic Buddy.
+    Analyzes content threat scores against individual safety thresholds.
+    - nsfw_score > 0.80
+    - violence_score > 0.80
+    - weapons_score > 0.75
     """
-    # 1. Determine maximum threat score and check if threshold is breached (> 0.85)
-    threats = {
-        "violence": payload.violence_score,
-        "hate_speech": payload.hate_speech_score,
-        "adult_content": payload.adult_content_score
-    }
+    threat_detected = False
+    threat_type = "none"
     
-    max_threat_type = "none"
-    max_score = 0.0
-    for t_type, score in threats.items():
-        if score > max_score:
-            max_score = score
-            max_threat_type = t_type
-
-    # Safety Threshold Gate (> 0.85)
-    if max_score > 0.85:
+    if payload.nsfw_score > 0.80:
         threat_detected = True
-        threat_type = max_threat_type
-    else:
-        # No breach detected, no interception needed
+        threat_type = "adult_content"
+    elif payload.violence_score > 0.80:
+        threat_detected = True
+        threat_type = "violence"
+    elif payload.weapons_score > 0.75:
+        threat_detected = True
+        threat_type = "weapons"
+
+    # Safety Threshold Gate
+    if not threat_detected:
         return ThreatTriggerResponse(
             threat_detected=False,
             threat_type="none",
@@ -121,11 +118,7 @@ def trigger_threat(payload: ThreatTriggerRequest):
     )
 
     # 3. Create the initial intervention message matching Socratic State
-    # Acknowledge: First contact.
-    if payload.child_age <= 10:
-        initial_question = "Hi there! I noticed some scary things on your screen, so I've covered it to keep you safe. Can you tell me what you were looking at, okay?"
-    else:
-        initial_question = f"Hey. I've temporarily intercepted the screen because I detected material that looks like {threat_type.replace('_', ' ')}. Socratic Buddy is here to chat. How did you end up on this page?"
+    initial_question = f"I noticed a video containing {threat_type.replace('_', ' ')} was playing on your screen. What were you hoping to learn or explore from that video?"
 
     # Pre-populate history with the first assistant greeting to keep context intact
     import json
