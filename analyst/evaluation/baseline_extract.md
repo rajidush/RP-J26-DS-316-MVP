@@ -1,21 +1,27 @@
-# Step 2 — OCR extraction baseline
+# Step 2–3 — Extraction baseline
 
-Measured with RapidOCR on synthetic `analyst/demo_assets/` screenshots (high-contrast).
+## OCR (Step 2)
 
-| Asset | Expect | Result |
-|---|---|---|
-| `01_clean_gaming.png` | gaming slang tokens | See unittest `test_ocr_demo` |
-| `02_hate_threat.png` | threat tokens → cascade **hate** | See unittest |
-| `03_hate_identity.png` | identity tokens | See unittest |
-| `04_benign_chat.png` | benign tokens → **not-hate** | See unittest |
+Measured with RapidOCR on synthetic `analyst/demo_assets/*.png`.
 
-**Backend:** `rapidocr` (fallback: tesseract / none).  
-**Rule:** empty OCR must not crash; overlay `--text` still works.
+| Asset | Expect |
+|---|---|
+| `01_clean_gaming.png` | clean → not-hate |
+| `02_hate_threat.png` | hate via OCR |
+| `03_hate_identity.png` | hate via OCR |
+| `04_benign_chat.png` | not-hate |
 
-Re-run:
+## ASR (Step 3)
+
+Synthetic WAVs from Windows SAPI (`generate_audio.py`). Backend: `faster-whisper` tiny, CPU int8.
+
+| Asset | Expect |
+|---|---|
+| `02_hate_threat.wav` | transcript contains kill/yourself → hate |
+| Injected ASR tests | work even if Whisper missing |
 
 ```powershell
-python -m analyst.demo_assets.generate
-python -m unittest analyst.tests.test_ocr_demo -v
-python -m analyst --replay analyst/demo_assets --age 10
+python -m analyst.demo_assets.generate_audio
+python -m unittest analyst.tests.test_asr_demo -v
+python -m analyst --audio analyst/demo_assets/02_hate_threat.wav --age 10
 ```
