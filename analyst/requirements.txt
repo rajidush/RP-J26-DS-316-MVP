@@ -1,0 +1,9 @@
+# Analyst (C2) — Python dependencies
+pydantic>=2.0.0
+pillow>=10.0.0
+numpy>=1.24.0
+
+# Optional (install when ready — pipeline still runs without them)
+# rapidocr-onnxruntime>=1.3.0
+# onnxruntime>=1.17.0
+# faster-whisper>=1.0.0
