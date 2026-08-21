@@ -1,50 +1,61 @@
 # C2 Analyst — build steps (do in order)
 
 Source of truth: Engineering Plan v0.1 §4.  
-Rule: **each step must leave a working CLI** (`python -m analyst --text "..."`). No dead ends.
+Rule: **each step must leave a working CLI** (`python -m analyst ...`). No dead ends.
 
 | Step | Goal | Status |
 |---|---|---|
 | **0** | Clean `main` + `analyst/` skeleton | Done |
-| **1** | Pretrained Stage-1 text + demo assets | **This branch** |
-| **2** | OCR path verified on demo screenshots | Next |
-| **3** | ASR path (Whisper) on short clips | Later |
+| **1** | Pretrained Stage-1 text + demo assets | Done |
+| **2** | OCR path verified on demo screenshots | **Done (this session)** |
+| **3** | ASR path (Whisper) on short clips | **Next** |
 | **4** | Pretrained CLIP / image_fast stub → real | Later |
 | **5** | Fusion + `hate.detected` demo script | Later |
 | **6** | After demo: fine-tune + Dataset C (research) | After demo |
 
 ---
 
-## Step 1 — Pretrained Stage-1 text (current)
+## Step 1 — Pretrained Stage-1 text
 
-**What we build**
+- Lexicon always on; optional HF model `martin-ha/toxic-comment-model`
+- Score = `max(lexicon, pretrained)`
+- Demo PNGs in `analyst/demo_assets/`
 
-- Load a **public pretrained** toxicity/hate classifier on CPU (HuggingFace).
-- Always keep **lexicon** as backup / boost (gaming slang stays low).
-- Final Stage-1 text score = `max(lexicon, pretrained)`.
-- If `transformers` or model download fails → **lexicon only** (demo still works).
+```powershell
+python -m analyst --text "gg ez noob" --age 12
+```
 
-**Default model**
+---
 
-- `martin-ha/toxic-comment-model` (DistilBERT, toxic vs non-toxic)
-- Override: env `ANALYST_TEXT_MODEL=<hf-id>`
+## Step 2 — OCR on screenshots
+
+**What we built**
+
+- High-contrast synthetic chat PNGs (OCR-friendly)
+- RapidOCR extract → Stage-1 text → `hate.detected` / not-hate
+- Automated checks: `analyst/tests/test_ocr_demo.py`
+- Notes: `analyst/evaluation/baseline_extract.md`
 
 **How to run**
 
 ```powershell
-pip install -r analyst/requirements.txt
-pip install transformers torch --index-url https://download.pytorch.org/whl/cpu
-# first run downloads the model (~250MB), then works offline from cache
-
-python -m analyst --text "you should kys" --age 10
-python -m analyst --text "gg ez noob" --age 12
+pip install rapidocr-onnxruntime   # if needed
+python -m analyst.demo_assets.generate
+python -m unittest analyst.tests.test_ocr_demo -v
 python -m analyst --replay analyst/demo_assets --age 10
 ```
 
 **Done means**
 
-- [x] Pretrained plug in `stage1/text_fast.py`
-- [x] Lexicon never removed
-- [x] `demo_assets/` with clean + hate screenshots
-- [x] Tests still pass without GPU / without transformers installed
-- [x] `BUILD_STEPS.md` roadmap for Steps 2–6
+- [x] OCR recovers key tokens from each demo PNG
+- [x] Hate screenshot → decision `hate` with non-empty `ocr_text`
+- [x] Clean gaming screenshot → `not-hate`
+- [x] Missing OCR package still allows `--text` path (no crash)
+
+---
+
+## Step 3 — ASR (next)
+
+- Whisper tiny/base on short `.wav` next to demo images
+- Same cascade: transcript → Stage-1 text
+- Keep working if Whisper missing

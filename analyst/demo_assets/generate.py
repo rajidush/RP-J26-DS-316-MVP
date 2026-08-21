@@ -1,25 +1,23 @@
-"""Create synthetic chat screenshots for --replay demos (no child data)."""
+"""Create synthetic chat screenshots optimized for OCR demos (no child data)."""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 OUT = Path(__file__).resolve().parent
 
-
 SAMPLES = [
-    ("01_clean_gaming.png", "gg ez noob that was a fun match"),
-    ("02_hate_threat.png", "you should kys nobody likes you"),
-    ("03_hate_identity.png", "go back to where you came from retard"),
-    ("04_benign_chat.png", "want to play minecraft later tonight?"),
+    ("01_clean_gaming.png", "gg ez noob that was a fun match", "clean"),
+    ("02_hate_threat.png", "you should kys nobody likes you", "hate"),
+    ("03_hate_identity.png", "go back to where you came from retard", "hate"),
+    ("04_benign_chat.png", "want to play minecraft later tonight", "clean"),
 ]
 
 
-def _font(size: int = 28):
-    for name in ("arial.ttf", "seguiemj.ttf", "Calibri.ttf"):
+def _font(size: int = 36):
+    for name in ("arial.ttf", "C:\\Windows\\Fonts\\arial.ttf", "segoeui.ttf"):
         try:
             return ImageFont.truetype(name, size)
         except Exception:
@@ -28,25 +26,35 @@ def _font(size: int = 28):
 
 
 def render(path: Path, text: str) -> None:
-    img = Image.new("RGB", (900, 200), color=(32, 34, 37))  # discord-ish dark
+    # Light high-contrast frame — RapidOCR is more reliable than dark Discord theme.
+    img = Image.new("RGB", (1000, 220), color=(245, 245, 245))
     draw = ImageDraw.Draw(img)
-    draw.rectangle((16, 16, 884, 184), fill=(47, 49, 54))
-    draw.text((36, 40), "DemoUser", fill=(114, 137, 218), font=_font(22))
-    draw.text((36, 80), text, fill=(220, 221, 222), font=_font(28))
+    draw.rectangle((20, 20, 980, 200), fill=(255, 255, 255), outline=(180, 180, 180), width=2)
+    draw.text((40, 40), "DemoUser:", fill=(20, 20, 20), font=_font(28))
+    draw.text((40, 100), text, fill=(0, 0, 0), font=_font(36))
     img.save(path, format="PNG")
 
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
-    for name, text in SAMPLES:
+    for name, text, _kind in SAMPLES:
         render(OUT / name, text)
         print("wrote", name)
     (OUT / "README.md").write_text(
         "# Demo assets (synthetic)\n\n"
-        "Generated chat-style PNGs for `python -m analyst --replay analyst/demo_assets`.\n"
-        "No real child data. Regenerate: `python -m analyst.demo_assets.generate`\n",
+        "High-contrast chat-style PNGs for OCR + cascade demos.\n\n"
+        "```powershell\n"
+        "python -m analyst.demo_assets.generate\n"
+        "python -m analyst --replay analyst/demo_assets --age 10\n"
+        "```\n\n"
+        "No real child data.\n",
         encoding="utf-8",
     )
+    # Expected phrases for automated OCR checks (substring match).
+    expect = {name: text.lower() for name, text, _ in SAMPLES}
+    import json
+
+    (OUT / "expected.json").write_text(json.dumps(expect, indent=2), encoding="utf-8")
     return 0
 
 
