@@ -1,5 +1,8 @@
 # Offline Socratic Child Safety Engine
 
+> **Scope:** This folder is the **C3 Educator / C4 dashboard demo API** (Socratic + parent data).  
+> **C2 Hate-Speech Analyst** lives at repo root: `analyst/` — run `python -m analyst`. Do not put detection models here.
+
 This is the offline Python backend (The Cognitive Engine) designed to run completely locally, protecting children's privacy by maintaining **zero data transit** (100% offline). It acts as a deterministic pedagogical state machine that guides minors through a 3-step cognitive scaffold when a safety threat is intercepted on their screen.
 
 ## Prerequisites

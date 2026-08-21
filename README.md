@@ -76,7 +76,7 @@ Persona thresholds (θ2): ages 8–10 → 0.55 · 11–13 → 0.65 · 14–15 �
 ## Repository layout (C2)
 
 ```
-analyst/                 ← production Analyst engine (start here)
+analyst/                 ← production Analyst engine (ONLY C2 path — start here)
 ├── ingest/              frame/audio loaders (replay until C1 bus)
 ├── extract/             ocr.py · asr.py · embed.py (CLIP plug)
 ├── stage1/              lexicon · text_fast · image_fast
@@ -90,10 +90,11 @@ analyst/                 ← production Analyst engine (start here)
 ├── evaluation/          benchmark reports (A1/A4)
 └── tests/
 
-docs/                    (add Engineering Plan PDF/MD copy for the team)
-app/ · offline_backend/  legacy web demo — NOT the production path
+offline_backend/         C3 Educator + C4 dashboard demo API (teammates) — not C2
+app/                     Shared Next.js sandbox for C3/C4 demo UI — not C2 detection
 ```
 
+**Cleanup note:** The old duplicate `offline_backend/analyst/` and web `AnalystPanel` were removed so only root `analyst/` owns hate-speech detection. Socratic (`socratic_agent.py`) and parent dashboard endpoints were left untouched.
 ---
 
 ## Current status (honest)
@@ -107,7 +108,7 @@ app/ · offline_backend/  legacy web demo — NOT the production path
 | OCR (RapidOCR) / ASR (Whisper tiny) | **Optional plugs** — install when needed |
 | CLIP / image_fast / text_full ONNX | **Deferred plugs** — Milestone A2/A3 |
 | ZeroMQ bus + C1 frame subscribe | **Later integration** |
-| Next.js web app | **Legacy** — may later *consume* `hate.detected` only |
+| Next.js / offline_backend web demo | **Teammate C3/C4 sandbox** — not used for C2 detection |
 
 ---
 
