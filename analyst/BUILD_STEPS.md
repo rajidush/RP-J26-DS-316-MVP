@@ -8,16 +8,14 @@ Rule: **each step must leave a working CLI**. No dead ends.
 | **0** | Clean `main` + `analyst/` skeleton | Done |
 | **1** | Pretrained Stage-1 text + demo assets | Done |
 | **2** | OCR path verified on demo screenshots | Done |
-| **3** | ASR path (Whisper) on short clips | **Done (this session)** |
-| **4** | Pretrained CLIP / image_fast stub → real | **Next** |
-| **5** | Fusion + end-to-end demo script | Later |
+| **3** | ASR path (Whisper) on short clips | Done |
+| **4** | Pretrained CLIP / image_fast zero-shot | Done |
+| **5** | Fusion + end-to-end demo script | **Done (this session)** |
 | **6** | After demo: fine-tune + Dataset C (research) | After demo |
 
 ---
 
 ## Step 1 — Pretrained Stage-1 text
-
-Lexicon + optional HF `martin-ha/toxic-comment-model`.
 
 ```powershell
 python -m analyst --text "gg ez noob" --age 12
@@ -37,33 +35,57 @@ python -m analyst --replay analyst/demo_assets --age 10
 
 ## Step 3 — ASR (Whisper)
 
-**What we built**
-
-- Windows SAPI synthetic WAVs (`generate_audio.py`) — no real child voice
-- `faster-whisper` tiny on CPU; missing package → skip audio, no crash
-- Same cascade: transcript → Stage-1 text → `hate.detected`
-- Tests: `analyst/tests/test_asr_demo.py`
-
-**How to run**
-
 ```powershell
-pip install faster-whisper
 python -m analyst.demo_assets.generate_audio
 python -m unittest analyst.tests.test_asr_demo -v
 python -m analyst --audio analyst/demo_assets/02_hate_threat.wav --age 10
 ```
 
-Replay still prefers matching `.wav` next to each PNG if present.
+---
 
-**Done means**
+## Step 4 — CLIP / image_fast
 
-- [x] Hate WAV → non-empty transcript → decision `hate`
-- [x] Injected ASR path works without Whisper installed
-- [x] Media wiped after audio-only analyse
+```powershell
+python -m analyst.demo_assets.generate
+python -m unittest analyst.tests.test_image_fast -v
+```
+
+Without torch, backends report `clip=deferred` — text path still works.
 
 ---
 
-## Step 4 — CLIP / image_fast (next)
+## Step 5 — Fusion + end-to-end demo
 
-- Pretrained MobileCLIP or CLIP ONNX for image branch
-- Empty-text harmful image can escalate without OCR
+**What we built**
+
+- Rule-based late fusion (0.6 text + 0.4 vision, meme bump when both mid)
+- `python -m analyst.demo_e2e` runs a fixed matrix: text, OCR, ASR, vision-only, multimodal
+- Prints a latency table + `hate.detected` JSON
+- Writes `analyst/evaluation/demo_e2e_report.md` each run
+- Tests: `analyst/tests/test_demo_e2e.py`
+
+**How to run**
+
+```powershell
+python -m analyst.demo_assets.generate
+python -m analyst.demo_assets.generate_audio
+python -m unittest analyst.tests.test_demo_e2e -v
+python -m analyst.demo_e2e --age 10
+```
+
+`vision_only_05` is `expect=any` until the trained probe (Step 6).
+
+**Done means**
+
+- [x] Text hate/clean match in the demo table
+- [x] `hate.detected` envelope includes `child_safe_summary`
+- [x] Latency columns: ocr / asr / clip / total
+- [x] Markdown report written under `analyst/evaluation/`
+
+---
+
+## Step 6 — Fine-tune + Dataset C (after demo)
+
+- Logistic probe on CLIP embeddings
+- Fusion MLP vs this rule-based head
+- Do not block the live demo on this step

@@ -44,6 +44,8 @@ class OcrDemoAssetTests(unittest.TestCase):
             text = self.engine.extract(Image.open(path)).lower()
             expected = self.expect.get(path.name, path.stem.replace("_", " "))
             # Require at least 2 distinctive tokens from the expected line
+            if path.name not in self.expect:
+                continue  # vision-only / extra assets are not OCR fixtures
             tokens = [t for t in expected.split() if len(t) > 2][:3]
             hits = sum(1 for t in tokens if t in text)
             self.assertGreaterEqual(

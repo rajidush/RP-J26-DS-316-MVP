@@ -17,7 +17,7 @@ from .extract.ocr import OcrEngine
 from .schemas import AnalystRunResult, new_id
 from .stage1.image_fast import ImageFast
 from .stage1.text_fast import TextFast
-from .stage2.fusion import TextFull, fuse
+from .stage2.fusion import TextFull, fuse, fusion_detail
 
 
 def _image_from_bytes(data: Optional[bytes]) -> Optional[Image.Image]:
@@ -36,7 +36,7 @@ class AnalystPipeline:
         self.asr = AsrEngine(model_size="tiny")
         self.embed = ImageEmbedder()
         self.text_fast = TextFast()
-        self.image_fast = ImageFast()
+        self.image_fast = ImageFast(embedder=self.embed)
         self.text_full = TextFull()
 
     def backends(self) -> dict:
@@ -103,24 +103,42 @@ class AnalystPipeline:
         image = _image_from_bytes(frame)
         latency: dict[str, float] = {}
 
-        t_ocr = time.perf_counter()
+        def _timed_ocr():
+            t = time.perf_counter()
+            text = self.ocr.extract(image)
+            return text, round((time.perf_counter() - t) * 1000, 1)
+
+        def _timed_asr():
+            t = time.perf_counter()
+            text = self.asr.transcribe(audio)
+            return text, round((time.perf_counter() - t) * 1000, 1)
+
+        t_extract = time.perf_counter()
         with ThreadPoolExecutor(max_workers=2) as pool:
-            ocr_f = pool.submit(self.ocr.extract, image)
-            asr_f = pool.submit(self.asr.transcribe, audio)
-            ocr_text = ocr_f.result()
-            transcript = asr_f.result()
-        latency["extract_ms"] = round((time.perf_counter() - t_ocr) * 1000, 1)
+            ocr_f = pool.submit(_timed_ocr)
+            asr_f = pool.submit(_timed_asr)
+            ocr_text, ocr_ms = ocr_f.result()
+            transcript, asr_ms = asr_f.result()
+        latency["ocr_ms"] = ocr_ms
+        latency["asr_ms"] = asr_ms
+        latency["extract_ms"] = round((time.perf_counter() - t_extract) * 1000, 1)
 
         combined = " ".join(p for p in (overlay_text, ocr_text, transcript) if p).strip()
+        t_clip = time.perf_counter()
         emb = self.embed.embed(image)
+        latency["clip_ms"] = round((time.perf_counter() - t_clip) * 1000, 1)
 
         t_s1 = time.perf_counter()
         text_score, category, hits = self.text_fast.score(combined)
-        vision_score = self.image_fast.score(emb)
+        vision_score = self.image_fast.score(embedding=emb, image=image)
         latency["stage1_ms"] = round((time.perf_counter() - t_s1) * 1000, 1)
 
         if not combined and image is not None and self.image_fast.name == "deferred":
             notes.append("image_without_text_vision_deferred")
+        elif not combined and vision_score >= STAGE1_THETA:
+            notes.append("vision_only_escalation")
+            if category == "none":
+                category = "hate_identity"
 
         escalated = text_score >= STAGE1_THETA or vision_score >= STAGE1_THETA
         stage1 = {
@@ -133,13 +151,22 @@ class AnalystPipeline:
             t_s2 = time.perf_counter()
             full = self.text_full.score(combined, text_score)
             fused = fuse(full, vision_score)
-            if self.image_fast.name == "deferred":
+            # Do not dilute a strong text hit when vision is inactive / deferred.
+            if self.image_fast.name == "deferred" or vision_score <= 0.0:
                 fused = max(fused, full)
+            # Vision-only: text_full may be ~0; keep vision signal.
+            if not combined and vision_score >= STAGE1_THETA:
+                fused = max(fused, vision_score)
             latency["stage2_ms"] = round((time.perf_counter() - t_s2) * 1000, 1)
+            detail = fusion_detail(full, vision_score)
             stage2 = {
                 "text_full": round(full, 4),
                 "vision_score": round(vision_score, 4),
                 "fused": fused,
+                "text_weight": float(detail["text_weight"]),
+                "vision_weight": float(detail["vision_weight"]),
+                "weighted": float(detail["weighted"]),
+                "meme_bump": 1.0 if detail["meme_bump"] else 0.0,
             }
             risk = fused
         else:

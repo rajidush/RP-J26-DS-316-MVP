@@ -25,3 +25,24 @@ python -m analyst.demo_assets.generate_audio
 python -m unittest analyst.tests.test_asr_demo -v
 python -m analyst --audio analyst/demo_assets/02_hate_threat.wav --age 10
 ```
+
+## Vision / CLIP (Step 4)
+
+| Asset / path | Expect |
+|---|---|
+| Injected `image_fast` | vision-only → hate |
+| `05_vision_only.png` | no chat text; CLIP optional (may stay deferred) |
+| Missing torch | `clip=deferred`, text/OCR/ASR still work |
+
+```powershell
+python -m analyst.demo_assets.generate
+python -m unittest analyst.tests.test_image_fast -v
+```
+
+## End-to-end demo (Step 5)
+
+```powershell
+python -m analyst.demo_e2e --age 10
+```
+
+Writes `analyst/evaluation/demo_e2e_report.md` (latency table + `hate.detected` JSON).
