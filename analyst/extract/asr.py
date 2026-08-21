@@ -1,4 +1,4 @@
-"""ASR plug. faster-whisper tiny on CPU if installed; otherwise skip audio."""
+"""ASR — faster-whisper tiny/base.en on CPU. Missing package = skip, no crash."""
 
 from __future__ import annotations
 
@@ -6,25 +6,28 @@ import os
 import tempfile
 from typing import Callable, Optional
 
-_WHISPER_IMPORT_OK = False
+_WHISPER_OK = False
 try:
     from faster_whisper import WhisperModel  # noqa: F401
 
-    _WHISPER_IMPORT_OK = True
+    _WHISPER_OK = True
 except Exception:
-    WhisperModel = None  # type: ignore[misc, assignment]
+    WhisperModel = None  # type: ignore
 
 
 class AsrEngine:
-    """Lazy-loads Whisper tiny on first clip so FastAPI startup stays fast."""
-
-    def __init__(self, transcribe_fn: Optional[Callable[[bytes], str]] = None) -> None:
+    def __init__(
+        self,
+        model_size: str = "tiny",
+        transcribe_fn: Optional[Callable[[bytes], str]] = None,
+    ) -> None:
+        self.model_size = model_size
         self._override = transcribe_fn
         self._model = None
         if self._override is not None:
             self.name = "injected"
-        elif _WHISPER_IMPORT_OK:
-            self.name = "faster-whisper-tiny"
+        elif _WHISPER_OK:
+            self.name = f"faster-whisper-{model_size}"
         else:
             self.name = "none"
 
@@ -36,11 +39,10 @@ class AsrEngine:
                 return (self._override(audio_bytes) or "").strip()
             except Exception:
                 return ""
-        if not _WHISPER_IMPORT_OK:
+        if not _WHISPER_OK:
             return ""
         try:
-            text = self._whisper(audio_bytes)
-            return (text or "").strip()
+            return (self._whisper(audio_bytes) or "").strip()
         except Exception:
             self.name = "whisper_failed"
             return ""
@@ -49,10 +51,10 @@ class AsrEngine:
         from faster_whisper import WhisperModel
 
         if self._model is None:
-            self._model = WhisperModel("tiny", device="cpu", compute_type="int8")
-            self.name = "faster-whisper-tiny"
+            self._model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
+            self.name = f"faster-whisper-{self.model_size}"
 
-        suffix = _guess_suffix(audio_bytes)
+        suffix = ".wav" if audio_bytes[:4] == b"RIFF" else ".webm"
         fd, path = tempfile.mkstemp(suffix=suffix)
         os.close(fd)
         try:
@@ -65,15 +67,3 @@ class AsrEngine:
                 os.unlink(path)
             except OSError:
                 pass
-
-
-def _guess_suffix(data: bytes) -> str:
-    if data[:4] == b"RIFF":
-        return ".wav"
-    if data[:4] == b"OggS":
-        return ".ogg"
-    if data[:4] == b"fLaC":
-        return ".flac"
-    if data[:4] == b"\x1aE\xdf\xa3":
-        return ".webm"
-    return ".wav"

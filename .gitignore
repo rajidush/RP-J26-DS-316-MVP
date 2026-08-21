@@ -7,9 +7,17 @@ coverage/
 !.env.example
 __pycache__/
 *.pyc
+.venv/
+venv/
 offline_backend/venv/
 offline_backend/models/*.onnx
 offline_backend/models/*.bin
 offline_backend/models/*.pt
+analyst/.venv/
+analyst/models/*.onnx
+analyst/models/*.bin
+analyst/models/*.pt
+analyst/models/*.gguf
+**/dashboard_history.json
 
 offline_backend/dashboard_history.json

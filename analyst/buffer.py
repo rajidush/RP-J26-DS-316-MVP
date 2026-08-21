@@ -1,4 +1,4 @@
-"""Bounded RAM slots for one trigger. Media is wiped in `finally`, never written to disk."""
+"""Bounded RAM slots. Frames/audio never go to disk; wiped after each run."""
 
 from __future__ import annotations
 
@@ -25,8 +25,6 @@ def _zero(buf: Optional[bytearray]) -> None:
 
 
 class TransientMediaBuffer:
-    """At most `max_slots` frames/audio clips in process RAM."""
-
     def __init__(self, max_slots: int = 2) -> None:
         self.max_slots = max_slots
         self._lock = threading.Lock()

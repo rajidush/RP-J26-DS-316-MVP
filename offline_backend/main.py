@@ -1,12 +1,9 @@
 import os
 import uuid
-from typing import Optional
-from fastapi import FastAPI, HTTPException, Body, File, Form, UploadFile
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from socratic_agent import SocraticAgentManager
-from analyst.pipeline import get_pipeline
-from analyst.schema import AnalystHealth, AnalystResult
 import dashboard_store
 
 
@@ -69,59 +66,9 @@ def read_root():
         "system": "Socratic Buddy Child Safety Interceptor",
         "engine_target": f"LM Studio ({agent_manager.base_url})",
         "model": agent_manager.model_name,
-        "analyst": "http://127.0.0.1:8001/api/analyst/health",
+        "note": "C2 Analyst lives in repo-root /analyst (python -m analyst). This service is C3/C4 demo API.",
     }
 
-
-@app.get("/api/analyst/health", response_model=AnalystHealth)
-def analyst_health():
-    """Which Analyst backends are live. Missing OCR/Whisper/ONNX does not take the API down."""
-    return get_pipeline().health()
-
-
-@app.post("/api/analyst/analyze", response_model=AnalystResult)
-async def analyst_analyze(
-    child_age: int = Form(10),
-    overlay_text: str = Form(""),
-    capture_screen: str = Form("false"),
-    image: Optional[UploadFile] = File(None),
-    audio: Optional[UploadFile] = File(None),
-):
-    """
-    Hate-speech cascade. Image/audio stay in RAM for this request, then are zeroed.
-    The web client receives JSON only — never the stored frame.
-    """
-    image_bytes = await image.read() if image is not None else None
-    audio_bytes = await audio.read() if audio is not None else None
-    if image is not None:
-        await image.close()
-    if audio is not None:
-        await audio.close()
-
-    grab = capture_screen.strip().lower() in ("1", "true", "yes")
-    try:
-        res = get_pipeline().analyze(
-            child_age=child_age,
-            overlay_text=overlay_text,
-            image_bytes=image_bytes,
-            audio_bytes=audio_bytes,
-            capture_screen=grab,
-        )
-        # Record analyst run for Parent Dashboard
-        dashboard_store.add_analyst_run(
-            child_age=res.child_age,
-            decision=res.decision,
-            risk_score=res.risk_score,
-            category=res.category,
-            ocr_text=res.ocr_text,
-            transcript=res.transcript,
-            overlay_text=res.overlay_text,
-            source=res.source,
-            session_hint=res.session_hint
-        )
-        return res
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Analyst failure: {exc}") from exc
 
 @app.post("/api/perception/trigger", response_model=ThreatTriggerResponse)
 def trigger_threat(payload: ThreatTriggerRequest):
@@ -130,13 +77,12 @@ def trigger_threat(payload: ThreatTriggerRequest):
     Analyzes content threat scores. If a threshold is breached (score > 0.85),
     it flags threat_detected = True, extracts threat_type, and triggers Socratic Buddy.
     """
-    # 1. Determine maximum threat score and check if threshold is breached (> 0.85)
     threats = {
         "violence": payload.violence_score,
         "hate_speech": payload.hate_speech_score,
         "adult_content": payload.adult_content_score
     }
-    
+
     max_threat_type = "none"
     max_score = 0.0
     for t_type, score in threats.items():
@@ -144,12 +90,10 @@ def trigger_threat(payload: ThreatTriggerRequest):
             max_score = score
             max_threat_type = t_type
 
-    # Safety Threshold Gate (> 0.85)
     if max_score > 0.85:
         threat_detected = True
         threat_type = max_threat_type
     else:
-        # No breach detected, no interception needed
         return ThreatTriggerResponse(
             threat_detected=False,
             threat_type="none",
@@ -159,31 +103,25 @@ def trigger_threat(payload: ThreatTriggerRequest):
             current_phase="none"
         )
 
-    # 2. Threshold breached - Generate Socratic Session ID
     session_id = str(uuid.uuid4())
-    
-    # Initialize state machine at Acknowledge state
+
     session_state = agent_manager.init_session(
         session_id=session_id,
         child_age=payload.child_age,
         threat_type=threat_type
     )
 
-    # Record Socratic session start for Parent Dashboard
     dashboard_store.add_socratic_session_start(
         session_id=session_id,
         child_age=payload.child_age,
         threat_type=threat_type
     )
 
-    # 3. Create the initial intervention message matching Socratic State
-    # Acknowledge: First contact.
     if payload.child_age <= 10:
         initial_question = "Hi there! I noticed some scary things on your screen, so I've covered it to keep you safe. Can you tell me what you were looking at, okay?"
     else:
         initial_question = f"Hey. I've temporarily intercepted the screen because I detected material that looks like {threat_type.replace('_', ' ')}. Socratic Buddy is here to chat. How did you end up on this page?"
 
-    # Pre-populate history with the intercept event (user) and first assistant greeting
     import json
     initial_payload = {
         "socratic_response_to_child": initial_question,
@@ -196,7 +134,6 @@ def trigger_threat(payload: ThreatTriggerRequest):
     })
     session_state["history"].append({"role": "assistant", "content": json.dumps(initial_payload)})
 
-    # Record the initial assistant greeting as the first turn in the store
     dashboard_store.add_socratic_turn(
         session_id=session_id,
         child_response="",
@@ -240,7 +177,6 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
             session_id=payload.session_id,
             child_response=payload.child_response
         )
-        # Record turn for Parent Dashboard
         dashboard_store.add_socratic_turn(
             session_id=payload.session_id,
             child_response=payload.child_response,

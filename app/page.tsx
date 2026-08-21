@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import AnalystPanel from "./analyst-panel";
 import { BACKEND_URL } from "./lib/backend";
 import { 
   Shield, 
@@ -596,21 +595,6 @@ export default function SocraticPrototype() {
                   </div>
                 </div>
               </div>
-
-              <AnalystPanel
-                childAge={childAge}
-                onScore={(score, decision) => {
-                  setHateScore(score);
-                  setLastInterceptionStatus(
-                    decision === "hate"
-                      ? `Analyst flagged hate_speech (${score.toFixed(2)}). Frame wiped from RAM.`
-                      : `Analyst: not-hate (${score.toFixed(2)}). Frame wiped from RAM.`
-                  );
-                }}
-                onIntercept={(hate) => {
-                  void handleTriggerIntercept({ hate });
-                }}
-              />
 
               {/* Perception Layer Slider Controls */}
               <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-5" id="perception-panel">
