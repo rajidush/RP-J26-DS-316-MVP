@@ -1,21 +1,16 @@
 # J26-DS-316 Component 2 — The Analyst
 #
-# Production-oriented hate-speech cascade (Engineering Plan v0.1 §4).
-# Does NOT depend on the Next.js web demo.
+# Step-by-step guide: analyst/BUILD_STEPS.md
 #
 # Quick start (from repo root):
-#   cd analyst
-#   python -m venv .venv
-#   .venv\Scripts\Activate.ps1
-#   pip install -r requirements.txt
-#   pip install rapidocr-onnxruntime faster-whisper   # optional
-#   cd ..
+#   pip install -r analyst/requirements.txt
+#   python -m analyst.demo_assets.generate
 #   python -m analyst --text "you should kys" --age 10
-#   python -m analyst --text "gg ez noob" --age 12
-#   python -m analyst --image path\to\frame.png --age 10
+#   python -m analyst --replay analyst/demo_assets --age 10
 #
-# Replay a folder of screenshots:
-#   python -m analyst --replay path\to\frames --age 10
+# Step 1 pretrained text (optional):
+#   pip install transformers
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
 #
 # Tests:
 #   python -m unittest analyst.tests.test_pipeline -v
