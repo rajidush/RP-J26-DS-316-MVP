@@ -388,7 +388,7 @@ export default function SocraticPrototype() {
     
     const pollGuardState = async () => {
       try {
-        const res = await fetch("http://127.0.0.1:8000/api/guard/state");
+        const res = await fetch(`${BACKEND_URL}/api/guard/state`);
         if (res.ok) {
           const data = await res.json();
           setGuardState(data);
@@ -418,7 +418,7 @@ export default function SocraticPrototype() {
               child_age: childAge,
             };
             
-            const triggerRes = await fetch("http://127.0.0.1:8000/api/perception/trigger", {
+            const triggerRes = await fetch(`${BACKEND_URL}/api/perception/trigger`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(triggerPayload),
@@ -452,7 +452,7 @@ export default function SocraticPrototype() {
 
   const toggleSimulationMode = async (simMode: boolean) => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/guard/toggle", {
+      const res = await fetch(`${BACKEND_URL}/api/guard/toggle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ simulation_mode: simMode }),
@@ -467,7 +467,7 @@ export default function SocraticPrototype() {
 
   const toggleMonitorActive = async (active: boolean) => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/guard/toggle-monitor", {
+      const res = await fetch(`${BACKEND_URL}/api/guard/toggle-monitor`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ active: active }),
@@ -499,7 +499,7 @@ export default function SocraticPrototype() {
         const frameB64 = canvas.toDataURL("image/jpeg", 0.65);
         
         setAnalyzingVideo(true);
-        const res = await fetch("http://127.0.0.1:8000/api/guard/process-frame", {
+        const res = await fetch(`${BACKEND_URL}/api/guard/process-frame`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -538,7 +538,7 @@ export default function SocraticPrototype() {
               child_age: childAge,
             };
             
-            const triggerRes = await fetch("http://127.0.0.1:8000/api/perception/trigger", {
+            const triggerRes = await fetch(`${BACKEND_URL}/api/perception/trigger`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(triggerPayload),
@@ -577,14 +577,14 @@ export default function SocraticPrototype() {
 
   const resetGuardSession = async () => {
     try {
-      await fetch("http://127.0.0.1:8000/api/guard/reset", { method: "POST" });
+      await fetch(`${BACKEND_URL}/api/guard/reset`, { method: "POST" });
       setInterceptActive(false);
       setIsCompleted(false);
       setChatHistory([]);
       setChildEmotion("neutral");
       setAgreedToBoundary(false);
       
-      const res = await fetch("http://127.0.0.1:8000/api/guard/state");
+      const res = await fetch(`${BACKEND_URL}/api/guard/state`);
       if (res.ok) {
         const data = await res.json();
         setGuardState(data);
