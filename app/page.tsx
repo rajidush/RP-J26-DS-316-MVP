@@ -25,7 +25,9 @@ import {
   Chrome, 
   Lock,
   Compass,
-  ArrowRight
+  ArrowRight,
+  Activity,
+  Clock
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -337,12 +339,23 @@ interface ChatMessage {
 
 export default function SocraticPrototype() {
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<"sandbox" | "codeHub">("sandbox");
+  const [activeTab, setActiveTab] = useState<"sandbox" | "codeHub" | "videoGuard">("sandbox");
+
+  // Zero-Trust Guard States
+  const [guardState, setGuardState] = useState<any>(null);
+  const [guardSimMode, setGuardSimMode] = useState<boolean>(true);
+  const [guardActive, setGuardActive] = useState<boolean>(true);
+
+  // Custom Video Upload & Analysis States
+  const [videoUrl, setVideoUrl] = useState<string>("");
+  const [videoFilename, setVideoFilename] = useState<string>("");
+  const [analyzingVideo, setAnalyzingVideo] = useState<boolean>(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Parent Control Panel Inputs
   const [childAge, setChildAge] = useState<number>(10);
   const [violenceScore, setViolenceScore] = useState<number>(0.1);
-  const [hateScore, setHateScore] = useState<number>(0.1);
+  const [weaponsScore, setWeaponsScore] = useState<number>(0.1);
   const [adultScore, setAdultScore] = useState<number>(0.1);
 
   // Simulated active desktop behind the overlay
@@ -369,6 +382,251 @@ export default function SocraticPrototype() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory, loadingTurn]);
 
+  // Background Polling of Zero-Trust Guard state
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    const pollGuardState = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/guard/state`);
+        if (res.ok) {
+          const data = await res.json();
+          setGuardState(data);
+          
+          const nsfwBreached = data.nsfw_score > 0.80;
+          const violenceBreached = data.violence_score > 0.80;
+          const weaponsBreached = data.weapons_score > 0.75;
+          const anyBreached = nsfwBreached || violenceBreached || weaponsBreached;
+
+          // Auto block if simulation detects a threat in the background
+          if (anyBreached && guardSimMode && !interceptActive && !isCompleted) {
+            let detectedType = "none";
+            if (nsfwBreached) detectedType = "adult_content";
+            else if (violenceBreached) detectedType = "violence";
+            else if (weaponsBreached) detectedType = "weapons";
+
+            setLastInterceptionStatus(`ALERT: Zero-Trust Guard intercepted threat: ${detectedType}!`);
+            
+            if (nsfwBreached) setAdultScore(data.nsfw_score);
+            if (violenceBreached) setViolenceScore(data.violence_score);
+            if (weaponsBreached) setWeaponsScore(data.weapons_score);
+
+            const triggerPayload = {
+              nsfw_score: data.nsfw_score || 0.1,
+              violence_score: data.violence_score || 0.1,
+              weapons_score: data.weapons_score || 0.1,
+              child_age: childAge,
+            };
+            
+            const triggerRes = await fetch(`${BACKEND_URL}/api/perception/trigger`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(triggerPayload),
+            });
+            
+            if (triggerRes.ok) {
+              const triggerData = await triggerRes.json();
+              if (triggerData.threat_detected) {
+                setActiveThreatType(triggerData.threat_type);
+                setSessionId(triggerData.session_id);
+                setCurrentPhase("Acknowledge");
+                setChildEmotion("neutral");
+                setAgreedToBoundary(false);
+                setIsCompleted(false);
+                setChatHistory([
+                  { role: "assistant", content: JSON.stringify({ socratic_response_to_child: triggerData.initial_response, child_emotion: "neutral", agreed_to_boundary: false }) }
+                ]);
+                setInterceptActive(true);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // Silent connection issues
+      }
+    };
+    
+    interval = setInterval(pollGuardState, 2000);
+    return () => clearInterval(interval);
+  }, [guardSimMode, interceptActive, isCompleted, childAge]);
+
+  const toggleSimulationMode = async (simMode: boolean) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/guard/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simulation_mode: simMode }),
+      });
+      if (res.ok) {
+        setGuardSimMode(simMode);
+      }
+    } catch (err) {
+      console.error("Failed to toggle simulation mode:", err);
+    }
+  };
+
+  const toggleMonitorActive = async (active: boolean) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/guard/toggle-monitor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: active }),
+      });
+      if (res.ok) {
+        setGuardActive(active);
+      }
+    } catch (err) {
+      console.error("Failed to toggle monitor:", err);
+    }
+  };
+
+  // Custom Video Frame Grabber & Analysis Loop
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    const grabFrameAndProcess = async () => {
+      const video = videoRef.current;
+      if (!video || video.paused || video.ended || guardSimMode) return;
+      
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.min(640, video.videoWidth || 640);
+        canvas.height = Math.min(360, video.videoHeight || 360);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const frameB64 = canvas.toDataURL("image/jpeg", 0.65);
+        
+        setAnalyzingVideo(true);
+        const res = await fetch(`${BACKEND_URL}/api/guard/process-frame`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image_b64: frameB64,
+            filename: videoFilename
+          })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          setGuardState(data);
+          
+          const nsfwBreached = data.nsfw_score > 0.80;
+          const violenceBreached = data.violence_score > 0.80;
+          const weaponsBreached = data.weapons_score > 0.75;
+          const anyBreached = nsfwBreached || violenceBreached || weaponsBreached;
+
+          if (anyBreached && !interceptActive && !isCompleted) {
+            video.pause();
+            
+            let detectedType = "none";
+            if (nsfwBreached) detectedType = "adult_content";
+            else if (violenceBreached) detectedType = "violence";
+            else if (weaponsBreached) detectedType = "weapons";
+
+            setLastInterceptionStatus(`ALERT: Zero-Trust Guard intercepted threat: ${detectedType}!`);
+            
+            if (nsfwBreached) setAdultScore(data.nsfw_score);
+            if (violenceBreached) setViolenceScore(data.violence_score);
+            if (weaponsBreached) setWeaponsScore(data.weapons_score);
+
+            const triggerPayload = {
+              nsfw_score: data.nsfw_score || 0.1,
+              violence_score: data.violence_score || 0.1,
+              weapons_score: data.weapons_score || 0.1,
+              child_age: childAge,
+            };
+            
+            const triggerRes = await fetch(`${BACKEND_URL}/api/perception/trigger`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(triggerPayload),
+            });
+            
+            if (triggerRes.ok) {
+              const triggerData = await triggerRes.json();
+              if (triggerData.threat_detected) {
+                setActiveThreatType(triggerData.threat_type);
+                setSessionId(triggerData.session_id);
+                setCurrentPhase("Acknowledge");
+                setChildEmotion("neutral");
+                setAgreedToBoundary(false);
+                setIsCompleted(false);
+                setChatHistory([
+                  { role: "assistant", content: JSON.stringify({ socratic_response_to_child: triggerData.initial_response, child_emotion: "neutral", agreed_to_boundary: false }) }
+                ]);
+                setInterceptActive(true);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Frame capture processing failed:", err);
+      } finally {
+        setAnalyzingVideo(false);
+      }
+    };
+    
+    if (!guardSimMode && videoUrl) {
+      interval = setInterval(grabFrameAndProcess, 2000);
+    }
+    
+    return () => clearInterval(interval);
+  }, [guardSimMode, videoUrl, videoFilename, interceptActive, isCompleted, childAge]);
+
+  const resetGuardSession = async () => {
+    try {
+      await fetch(`${BACKEND_URL}/api/guard/reset`, { method: "POST" });
+      setInterceptActive(false);
+      setIsCompleted(false);
+      setChatHistory([]);
+      setChildEmotion("neutral");
+      setAgreedToBoundary(false);
+      
+      const res = await fetch(`${BACKEND_URL}/api/guard/state`);
+      if (res.ok) {
+        const data = await res.json();
+        setGuardState(data);
+      }
+    } catch (err) {
+      console.error("Failed to reset guard state:", err);
+    }
+  };
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (videoUrl && videoUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(videoUrl);
+    }
+    
+    await resetGuardSession();
+    
+    const url = URL.createObjectURL(file);
+    setVideoUrl(url);
+    setVideoFilename(file.name);
+    toggleSimulationMode(false);
+  };
+
+  const selectPresetVideo = async (type: "nature" | "combat") => {
+    if (videoUrl && videoUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(videoUrl);
+    }
+    
+    await resetGuardSession();
+    
+    if (type === "nature") {
+      setVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4");
+      setVideoFilename("nature_wildlife_doc.mp4");
+    } else {
+      setVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4");
+      setVideoFilename("combat_match_battle_violence.mp4");
+    }
+    toggleSimulationMode(false);
+  };
+
   // Code Hub state
   const [selectedCodeFile, setSelectedCodeFile] = useState<"agent" | "main" | "req" | "readme">("agent");
   const [copied, setCopied] = useState<boolean>(false);
@@ -389,19 +647,14 @@ export default function SocraticPrototype() {
   };
 
   // Trigger Socratic Intercept Simulation (Local FastAPI + LM Studio)
-  const handleTriggerIntercept = async (scoreOverride?: { hate?: number }) => {
+  const handleTriggerIntercept = async () => {
     setApiError(null);
     setLastInterceptionStatus("Analyzing content vectors...");
 
-    const nextHate = scoreOverride?.hate ?? hateScore;
-    if (scoreOverride?.hate != null) {
-      setHateScore(scoreOverride.hate);
-    }
-
     const payload = {
+      nsfw_score: adultScore,
       violence_score: violenceScore,
-      hate_speech_score: nextHate,
-      adult_content_score: adultScore,
+      weapons_score: weaponsScore,
       child_age: childAge,
     };
 
@@ -495,22 +748,22 @@ export default function SocraticPrototype() {
   };
 
   // Quick Preset Triggers for Testing
-  const applyPreset = (type: "violence" | "hate" | "adult" | "clean") => {
+  const applyPreset = (type: "violence" | "weapons" | "adult" | "clean") => {
     if (type === "violence") {
       setViolenceScore(0.95);
-      setHateScore(0.15);
+      setWeaponsScore(0.15);
       setAdultScore(0.05);
-    } else if (type === "hate") {
+    } else if (type === "weapons") {
       setViolenceScore(0.05);
-      setHateScore(0.92);
+      setWeaponsScore(0.92);
       setAdultScore(0.12);
     } else if (type === "adult") {
       setViolenceScore(0.02);
-      setHateScore(0.08);
+      setWeaponsScore(0.08);
       setAdultScore(0.98);
     } else {
       setViolenceScore(0.12);
-      setHateScore(0.22);
+      setWeaponsScore(0.22);
       setAdultScore(0.15);
     }
   };
@@ -544,6 +797,18 @@ export default function SocraticPrototype() {
           >
             <Sliders className="w-4 h-4" />
             Prototype Sandbox
+          </button>
+          <button
+            onClick={() => setActiveTab("videoGuard")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
+              activeTab === "videoGuard" 
+                ? "bg-[#5A5A40] text-white shadow-sm" 
+                : "text-[#6B705C] hover:text-[#2D3025]"
+            }`}
+            id="tab-guard-btn"
+          >
+            <Shield className="w-4 h-4" />
+            Zero-Trust Video Guard
           </button>
           <button
             onClick={() => setActiveTab("codeHub")}
@@ -625,11 +890,11 @@ export default function SocraticPrototype() {
                     💥 High Violence
                   </button>
                   <button 
-                    onClick={() => applyPreset("hate")}
+                    onClick={() => applyPreset("weapons")}
                     className="text-xs px-2.5 py-1 rounded bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 transition"
-                    id="preset-hate-btn"
+                    id="preset-weapons-btn"
                   >
-                    🤬 Hate Speech
+                    🔫 Weapons / Arms
                   </button>
                   <button 
                     onClick={() => applyPreset("adult")}
@@ -683,12 +948,12 @@ export default function SocraticPrototype() {
                     />
                   </div>
 
-                  {/* Hate Speech */}
-                  <div className="flex flex-col gap-1.5" id="slider-hate-container">
+                  {/* Weapons Detection */}
+                  <div className="flex flex-col gap-1.5" id="slider-weapons-container">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-[#2D3025] font-medium">Hate Speech Score</span>
-                      <span className={`font-bold ${hateScore > 0.85 ? "text-rose-600 font-bold" : "text-[#6B705C]"}`}>
-                        {hateScore.toFixed(2)}
+                      <span className="text-[#2D3025] font-medium">Weapons Score</span>
+                      <span className={`font-bold ${weaponsScore > 0.75 ? "text-rose-600 font-bold" : "text-[#6B705C]"}`}>
+                        {weaponsScore.toFixed(2)}
                       </span>
                     </div>
                     <input 
@@ -696,10 +961,10 @@ export default function SocraticPrototype() {
                       min="0.0" 
                       max="1.0" 
                       step="0.05"
-                      value={hateScore} 
-                      onChange={(e) => setHateScore(parseFloat(e.target.value))}
+                      value={weaponsScore} 
+                      onChange={(e) => setWeaponsScore(parseFloat(e.target.value))}
                       className="w-full accent-[#5A5A40] bg-[#FAF9F6] border border-[#DDE0D0] h-2 rounded-lg appearance-none cursor-pointer"
-                      id="input-hate"
+                      id="input-weapons"
                     />
                   </div>
 
@@ -960,21 +1225,21 @@ export default function SocraticPrototype() {
 
                         <div 
                           onClick={() => {
-                            applyPreset("hate");
+                            applyPreset("weapons");
                             setTimeout(() => {
                               handleTriggerIntercept();
                             }, 100);
                           }}
                           className="group border border-amber-200 rounded-lg overflow-hidden bg-white cursor-pointer hover:border-amber-600 transition flex flex-col shadow-xs"
-                          id="video-hate-card"
+                          id="video-weapons-card"
                         >
                           <div className="aspect-video bg-amber-50/50 relative flex items-center justify-center border-b border-amber-100">
-                            <span className="text-xl text-amber-700 font-bold">Controversial Rant</span>
-                            <span className="absolute bottom-2 right-2 bg-amber-600 text-[10px] px-1.5 py-0.5 rounded text-white font-bold">Hate Speech</span>
+                            <span className="text-xl text-amber-700 font-bold">Tactical Firearms Demo</span>
+                            <span className="absolute bottom-2 right-2 bg-amber-600 text-[10px] px-1.5 py-0.5 rounded text-white font-bold">Weapons</span>
                           </div>
                           <div className="p-3">
-                            <h4 className="text-xs font-semibold text-[#2D3025] group-hover:text-amber-700 truncate">Slandering Communities & Angry Monologue</h4>
-                            <p className="text-[10px] text-amber-700 font-bold mt-1">Rants & Attacks</p>
+                            <h4 className="text-xs font-semibold text-[#2D3025] group-hover:text-amber-600 truncate">Tactical Gear & Banned Weapons Demo</h4>
+                            <p className="text-[10px] text-amber-600 font-bold mt-1">Weapons / Arms</p>
                           </div>
                         </div>
                       </div>
@@ -1344,6 +1609,413 @@ export default function SocraticPrototype() {
               </div>
 
             </div>
+          </section>
+        )}
+        {/* Simplified Zero-Trust Video Guard View */}
+        {activeTab === "videoGuard" && (
+          <section className="col-span-12 grid grid-cols-1 xl:grid-cols-12 gap-6 animate-fade-in" id="video-guard-section">
+            
+            {/* Left Column: 6 Cols - Child Video Portal */}
+            <div className="xl:col-span-6 flex flex-col gap-6">
+              
+              {/* Active Player Card */}
+              <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4">
+                <h3 className="font-semibold text-[#2D3025] flex items-center gap-2 text-sm uppercase tracking-wider font-sans border-b border-[#DDE0D0] pb-2">
+                  <Sliders className="w-4 h-4 text-[#5A5A40]" />
+                  Child Video Portal
+                </h3>
+                
+                <div className="flex flex-col gap-1.5 flex-1 justify-center">
+                  <span className="text-[10px] uppercase font-bold text-[#6B705C] font-sans">Active Video Player</span>
+                  <div className="relative aspect-video rounded-lg border border-[#DDE0D0] overflow-hidden bg-black flex items-center justify-center shadow-inner w-full">
+                    {videoUrl ? (
+                      <video 
+                        ref={videoRef}
+                        src={videoUrl}
+                        controls
+                        className={`w-full h-full object-contain transition duration-500 ${
+                          interceptActive ? "blur-[25px] pointer-events-none" : ""
+                        }`}
+                      />
+                    ) : (
+                      <div className="text-[#6B705C] text-xs text-center p-6 italic leading-relaxed">
+                        No video loaded. Select a demo preset or upload a custom file below to start!
+                      </div>
+                    )}
+                    
+                    {interceptActive && (
+                      <div className="absolute inset-0 bg-[#2D3025]/90 backdrop-blur-xs flex items-center justify-center p-2 z-50 overflow-hidden" id="socratic-buddy-interceptor-vg">
+                        <div className="bg-white border border-[#DDE0D0] rounded-xl w-full h-full shadow-lg flex flex-col overflow-hidden relative" id="interceptor-dialog-card-vg">
+                          {/* Safe Intervention Banner */}
+                          <div className="bg-[#5A5A40] px-3 py-1.5 flex items-center justify-between text-white border-b border-[#DDE0D0] shrink-0">
+                            <div className="flex items-center gap-1.5">
+                              <Shield className="w-3.5 h-3.5 text-white" />
+                              <span className="text-[10px] font-bold tracking-tight text-white font-sans uppercase">Socratic Shield Intercept</span>
+                            </div>
+                            <div className="flex items-center gap-1 bg-white/10 px-1.5 py-0.5 rounded text-[8px] font-mono">
+                              <Lock className="w-2.5 h-2.5 text-white" /> Offline
+                            </div>
+                          </div>
+
+                          {/* Dialogue progress header */}
+                          <div className="bg-[#FAF9F6] border-b border-[#DDE0D0] px-3 py-1 flex items-center justify-between text-[9px] shrink-0 text-[#6B705C]">
+                            <span className="font-semibold uppercase tracking-wider text-[8px]">State:</span>
+                            <div className="flex items-center gap-1">
+                              <span className={`px-1 rounded ${currentPhase === "Acknowledge" ? "bg-[#E6D5C3] text-[#2D3025] font-bold" : ""}`}>1. Ack</span>
+                              <span className={`px-1 rounded ${currentPhase === "Reason" ? "bg-[#E6D5C3] text-[#2D3025] font-bold" : ""}`}>2. Reason</span>
+                              <span className={`px-1 rounded ${currentPhase === "Contract" ? "bg-[#E6D5C3] text-[#2D3025] font-bold" : ""}`}>3. Contract</span>
+                            </div>
+                          </div>
+
+                          {/* Interactive Chat Board area */}
+                          <div className="flex-1 p-2 overflow-y-auto flex flex-col gap-2 bg-[#FAF9F6] scrollbar-thin">
+                            <div className="flex items-start gap-2">
+                              <div className="w-7 h-7 rounded bg-[#5A5A40] flex items-center justify-center font-bold text-white text-[9px] shrink-0">SB</div>
+                              <div className="bg-white border border-[#DDE0D0] rounded-lg p-2 max-w-[85%] text-[#2D3025] text-[10px] leading-relaxed">
+                                <span className="font-bold text-[#5A5A40] block mb-0.5">Socratic Buddy</span>
+                                Hi! Socratic Buddy here. A video containing {activeThreatType.replace('_', ' ')} was blocked. Let&apos;s talk about what was on the screen.
+                              </div>
+                            </div>
+
+                            {chatHistory.map((item, index) => {
+                              let textContent = item.content;
+                              let emotion = "";
+                              let agreed = false;
+                              try {
+                                const parsed = JSON.parse(item.content);
+                                if (parsed && parsed.socratic_response_to_child) {
+                                  textContent = parsed.socratic_response_to_child;
+                                  emotion = parsed.child_emotion;
+                                  agreed = parsed.agreed_to_boundary;
+                                }
+                              } catch {}
+
+                              return (
+                                <div key={index} className={`flex items-start gap-2 ${item.role === "user" ? "flex-row-reverse" : ""}`}>
+                                  <div className={`w-7 h-7 rounded flex items-center justify-center font-bold text-[9px] shrink-0 ${item.role === "user" ? "bg-[#E6D5C3] text-[#2D3025] border border-[#5A5A40]" : "bg-[#5A5A40] text-white"}`}>
+                                    {item.role === "user" ? "ME" : "SB"}
+                                  </div>
+                                  <div className={`border rounded-lg p-2 max-w-[85%] text-[10px] leading-relaxed ${item.role === "user" ? "bg-[#E6D5C3]/20 border-[#DDE0D0] text-[#2D3025]" : "bg-white border-[#DDE0D0] text-[#2D3025]"}`}>
+                                    <span className="font-bold block mb-0.5 text-[#5A5A40]">{item.role === "user" ? "My Response" : "Socratic Buddy"}</span>
+                                    {textContent}
+                                    {emotion && (
+                                      <div className="mt-1 pt-1 border-t border-[#DDE0D0] flex items-center gap-1 text-[8px] text-[#6B705C]">
+                                        <span>Emotion: <strong className="capitalize">{emotion}</strong></span>
+                                        {agreed && <span className="text-emerald-700 font-bold ml-1">✓ Boundary Agreed</span>}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {loadingTurn && (
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded bg-[#5A5A40] flex items-center justify-center font-bold text-white text-[9px] shrink-0">SB</div>
+                                <div className="bg-white border border-[#DDE0D0] rounded-lg p-2 max-w-[85%] text-[#6B705C] text-[10px] italic flex items-center gap-1.5">
+                                  <RefreshCw className="w-3 animate-spin text-[#5A5A40]" /> Thinking...
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Completion Screen Overlay inside Chat */}
+                          {isCompleted && (
+                            <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center p-3 text-center z-20">
+                              <CheckCircle className="w-10 h-10 text-emerald-600 mb-1" />
+                              <h3 className="text-xs font-bold text-[#2D3025] font-sans">Pedagogical Boundary Confirmed</h3>
+                              <p className="text-[10px] text-[#6B705C] mt-1 max-w-[200px] leading-relaxed text-center">
+                                Socratic dialogue completed. We have pivoted away from the flagged video.
+                              </p>
+                              <button
+                                onClick={async () => {
+                                  await resetGuardSession();
+                                  setChildActiveApp("game");
+                                  setActiveTab("sandbox");
+                                  setLastInterceptionStatus("Successfully scaffolded child. Redirected to Sandbox.");
+                                }}
+                                className="mt-3 py-1.5 px-3 bg-[#5A5A40] hover:bg-[#454530] text-white font-bold rounded text-[10px] transition duration-200"
+                              >
+                                Go to Sandbox Game
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Chat Input form */}
+                          {!isCompleted && (
+                            <form onSubmit={handleSendDialogue} className="bg-white border-t border-[#DDE0D0] p-1.5 flex items-center gap-1.5 shrink-0">
+                              <input 
+                                type="text" 
+                                placeholder="Type response..." 
+                                value={userInput}
+                                onChange={(e) => setUserInput(e.target.value)}
+                                disabled={loadingTurn}
+                                className="flex-1 border border-[#DDE0D0] rounded px-2 py-1 text-[11px] focus:outline-none focus:border-[#5A5A40] disabled:opacity-50"
+                              />
+                              <button
+                                type="submit"
+                                disabled={loadingTurn || !userInput.trim()}
+                                className="px-3 py-1 bg-[#5A5A40] hover:bg-[#454530] text-white font-bold rounded text-[11px] transition"
+                              >
+                                Send
+                              </button>
+                            </form>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Upload & Preset controls */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-[#DDE0D0] pt-4">
+                  {/* Upload */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] uppercase font-bold text-[#6B705C] font-sans">Upload Video File</span>
+                    <label className="flex items-center justify-center gap-1.5 px-3 py-2 border border-[#DDE0D0] hover:border-[#5A5A40] rounded-lg bg-[#FAF9F6] text-xs font-semibold cursor-pointer text-[#6B705C] hover:text-[#2D3025] transition shadow-2xs">
+                      📁 Choose Video File...
+                      <input 
+                        type="file" 
+                        accept="video/*" 
+                        onChange={handleVideoUpload} 
+                        className="hidden" 
+                      />
+                    </label>
+                    {videoFilename && (
+                      <div className="text-[10px] text-[#5A5A40] font-mono break-all leading-normal bg-[#E6D5C3]/15 border border-[#DDE0D0] p-1.5 rounded">
+                        Playing: {videoFilename}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Presets */}
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] uppercase font-bold text-[#6B705C] font-sans">Pre-loaded Test Clips</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => selectPresetVideo("nature")}
+                        className={`text-xs py-2 px-1.5 border rounded-md font-semibold transition ${
+                          videoFilename === "nature_wildlife_doc.mp4" 
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-2xs" 
+                            : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200"
+                        }`}
+                      >
+                        🟢 Nature Video
+                      </button>
+                      <button
+                        onClick={() => selectPresetVideo("combat")}
+                        className={`text-xs py-2 px-1.5 border rounded-md font-semibold transition ${
+                          videoFilename === "combat_match_battle_violence.mp4"
+                            ? "bg-rose-600 text-white border-rose-600 shadow-2xs"
+                            : "bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200"
+                        }`}
+                      >
+                        💥 Combat Video
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Right Column: 6 Cols - Parent AI Visual Stream */}
+            <div className="xl:col-span-6 flex flex-col gap-6">
+              
+              {/* Real-time AI Visual Feed Monitor */}
+              <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-[#DDE0D0] pb-2">
+                  <h3 className="font-semibold text-[#2D3025] flex items-center gap-2 text-sm uppercase tracking-wider font-sans">
+                    <Shield className="w-4 h-4 text-[#5A5A40]" />
+                    AI Visual Scan Feed
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-[#6B705C] uppercase tracking-wider font-sans">
+                      {guardActive ? "🟢 Active Monitor" : "🔴 Paused"}
+                    </span>
+                    <button
+                      onClick={() => toggleMonitorActive(!guardActive)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        guardActive ? "bg-[#5A5A40]" : "bg-slate-300"
+                      }`}
+                      id="btn-toggle-monitor-active"
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                          guardActive ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative aspect-video w-full rounded-lg border border-[#DDE0D0] overflow-hidden bg-slate-950 flex items-center justify-center shadow-inner">
+                  {guardState?.last_frame ? (
+                    <img 
+                      src={guardState.last_frame} 
+                      alt="AI Visual Bounding Boxes" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="text-slate-500 text-xs flex flex-col items-center gap-2">
+                      <RefreshCw className="w-6 h-6 animate-spin text-[#5A5A40]" />
+                      Waiting for active video frames...
+                    </div>
+                  )}
+                  {analyzingVideo && (
+                    <span className="absolute top-2 right-2 bg-emerald-500 text-white font-mono text-[9px] px-1.5 py-0.5 rounded animate-pulse shadow-sm z-10">
+                      AI SCANNING...
+                    </span>
+                  )}
+                </div>
+
+                {/* Threat score progress bar */}
+                <div className="p-4 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg flex flex-col gap-3">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-[#2D3025] font-sans">Safety Evaluation Threat Score</span>
+                    <span className={guardState?.threat_score > 0.85 ? "text-rose-600 font-bold" : "text-[#5A5A40]"}>
+                      {guardState ? (guardState.threat_score * 100).toFixed(0) : 0}% / 85% Gate
+                    </span>
+                  </div>
+                  <div className="w-full bg-[#E1E2D9] h-3 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all duration-500 ${
+                        guardState?.threat_score > 0.85 ? "bg-rose-500" : "bg-[#5A5A40]"
+                      }`}
+                      style={{ width: `${guardState ? guardState.threat_score * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-[#6B705C] font-sans">
+                    <span>Safety Gate limit: 85%</span>
+                    <span className={guardState?.threat_score > 0.85 ? "text-rose-600 font-bold" : "text-emerald-700 font-bold"}>
+                      {guardState?.threat_score > 0.85 ? "🚨 INTERCEPT LOCKED" : "🛡️ ACTIVE MONITORING"}
+                    </span>
+                  </div>
+                  
+                  <button 
+                    onClick={async () => {
+                      await resetGuardSession();
+                      setLastInterceptionStatus("Ready & Guarding System");
+                    }}
+                    className="mt-2 py-2 px-3 bg-white hover:bg-slate-50 border border-[#DDE0D0] text-[#5A5A40] hover:text-[#2D3025] text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Reset Detection State
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Real-time Telemetry Dashboard Card */}
+            <div className="xl:col-span-6 flex flex-col gap-6">
+              <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4">
+                <h3 className="font-semibold text-[#2D3025] flex items-center gap-2 text-sm uppercase tracking-wider font-sans border-b border-[#DDE0D0] pb-2">
+                  <Activity className="w-4 h-4 text-[#5A5A40]" />
+                  Zero-Trust Telemetry Dashboard
+                </h3>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg p-2.5 flex flex-col gap-1">
+                    <span className="text-[10px] text-[#6B705C] uppercase font-semibold">Active File</span>
+                    <span className="font-bold text-[#2D3025] truncate" title={guardState?.video_name || "None"}>
+                      {guardState?.video_name || "No file playing"}
+                    </span>
+                  </div>
+                  
+                  <div className="bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg p-2.5 flex flex-col gap-1">
+                    <span className="text-[10px] text-[#6B705C] uppercase font-semibold">RAM Usage</span>
+                    <span className="font-bold text-[#2D3025] flex items-center gap-1">
+                      <Cpu className="w-3.5 h-3.5 text-[#5A5A40]" />
+                      {guardState?.ram_usage || 0} MB
+                    </span>
+                  </div>
+
+                  <div className="bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg p-2.5 flex flex-col gap-1">
+                    <span className="text-[10px] text-[#6B705C] uppercase font-semibold">Pipeline Latency</span>
+                    <span className="font-bold text-[#2D3025] flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-[#5A5A40]" />
+                      {guardState?.fps_latency || 0} ms
+                    </span>
+                  </div>
+
+                  <div className="bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg p-2.5 flex flex-col gap-1">
+                    <span className="text-[10px] text-[#6B705C] uppercase font-semibold">Start Time</span>
+                    <span className="font-bold text-[#2D3025]">
+                      {guardState?.start_time || "Not Started"}
+                    </span>
+                  </div>
+
+                  <div className="bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg p-2.5 flex flex-col gap-1">
+                    <span className="text-[10px] text-[#6B705C] uppercase font-semibold">Elapsed Time</span>
+                    <span className="font-bold text-[#2D3025]">
+                      {guardState?.elapsed_time || 0} seconds
+                    </span>
+                  </div>
+
+                  <div className="bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg p-2.5 flex flex-col gap-1">
+                    <span className="text-[10px] text-[#6B705C] uppercase font-semibold">Overall Status</span>
+                    <span className={`font-bold ${interceptActive ? "text-rose-600 animate-pulse animate-duration-1000" : "text-emerald-700"}`}>
+                      {interceptActive ? "🚨 Threat Alert" : "🛡️ Guarding"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Model-specific score metrics bars */}
+                <div className="mt-2 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg p-3 flex flex-col gap-3">
+                  <span className="text-[10px] text-[#6B705C] uppercase font-bold tracking-wider font-sans">ONNX Ensemble Model Scores</span>
+                  
+                  {/* NSFW Score */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-medium text-[#2D3025]">nsfw-classifier-ONNX (Adult Content)</span>
+                      <span className={guardState?.nsfw_score > 0.80 ? "text-rose-600 font-bold" : "text-[#5A5A40]"}>
+                        {((guardState?.nsfw_score || 0) * 100).toFixed(0)}% / 80% Threshold
+                      </span>
+                    </div>
+                    <div className="w-full bg-[#E1E2D9] h-2 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ${guardState?.nsfw_score > 0.80 ? "bg-rose-500" : "bg-emerald-600"}`}
+                        style={{ width: `${Math.min(100, (guardState?.nsfw_score || 0) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* MoViNet-A0 Score */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-medium text-[#2D3025]">MoViNet-A0 (Physical Violence/Fighting)</span>
+                      <span className={guardState?.violence_score > 0.80 ? "text-rose-600 font-bold" : "text-[#5A5A40]"}>
+                        {((guardState?.violence_score || 0) * 100).toFixed(0)}% / 80% Threshold
+                      </span>
+                    </div>
+                    <div className="w-full bg-[#E1E2D9] h-2 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ${guardState?.violence_score > 0.80 ? "bg-rose-500" : "bg-[#5A5A40]"}`}
+                        style={{ width: `${Math.min(100, (guardState?.violence_score || 0) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* YOLOv8-nano Score */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-medium text-[#2D3025]">YOLOv8-nano (Weapons detection)</span>
+                      <span className={guardState?.weapons_score > 0.75 ? "text-rose-600 font-bold" : "text-[#5A5A40]"}>
+                        {((guardState?.weapons_score || 0) * 100).toFixed(0)}% / 75% Threshold
+                      </span>
+                    </div>
+                    <div className="w-full bg-[#E1E2D9] h-2 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ${guardState?.weapons_score > 0.75 ? "bg-rose-500" : "bg-indigo-600"}`}
+                        style={{ width: `${Math.min(100, (guardState?.weapons_score || 0) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
           </section>
         )}
 
