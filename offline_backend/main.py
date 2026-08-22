@@ -1,5 +1,6 @@
 import os
 import uuid
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -30,12 +31,29 @@ agent_manager = SocraticAgentManager(
     model_name=os.getenv("LM_STUDIO_MODEL", "google/gemma-3-1b")
 )
 
+# Initialize Zero-Trust Guard
+from guard import ZeroTrustGuard
+guard_system = ZeroTrustGuard()
+guard_system.start()
+
 # --- Schemas ---
 
+class GuardToggleRequest(BaseModel):
+    simulation_mode: bool
+
+class GuardMonitorRequest(BaseModel):
+    active: bool
+
+class FrameAnalysisRequest(BaseModel):
+    image_b64: str
+    filename: str = ""
+
 class ThreatTriggerRequest(BaseModel):
-    violence_score: float = Field(0.0, description="Confidence score for violence (0.0 to 1.0)")
-    hate_speech_score: float = Field(0.0, description="Confidence score for hate speech (0.0 to 1.0)")
-    adult_content_score: float = Field(0.0, description="Confidence score for adult content (0.0 to 1.0)")
+    nsfw_score: float = Field(0.0, description="NSFW classifier score")
+    violence_score: float = Field(0.0, description="MoViNet-A0 violence score / Violence score")
+    weapons_score: float = Field(0.0, description="YOLOv8-nano weapons score")
+    hate_speech_score: float = Field(0.0, description="Hate speech score")
+    adult_content_score: float = Field(0.0, description="Adult content score")
     child_age: int = Field(10, description="The age of the child using the computer (e.g. 8 or 14)")
 
 class ThreatTriggerResponse(BaseModel):
@@ -74,26 +92,31 @@ def read_root():
 def trigger_threat(payload: ThreatTriggerRequest):
     """
     Simulates the 'Perception Layer' interceptor.
-    Analyzes content threat scores. If a threshold is breached (score > 0.85),
-    it flags threat_detected = True, extracts threat_type, and triggers Socratic Buddy.
+    Analyzes content threat scores against individual safety thresholds.
+    - nsfw / adult content score > 0.80
+    - violence_score > 0.80
+    - hate_speech_score > 0.80
+    - weapons_score > 0.75
     """
-    threats = {
-        "violence": payload.violence_score,
-        "hate_speech": payload.hate_speech_score,
-        "adult_content": payload.adult_content_score
-    }
+    threat_detected = False
+    threat_type = "none"
 
-    max_threat_type = "none"
-    max_score = 0.0
-    for t_type, score in threats.items():
-        if score > max_score:
-            max_score = score
-            max_threat_type = t_type
-
-    if max_score > 0.85:
+    nsfw_val = max(payload.nsfw_score, payload.adult_content_score)
+    if nsfw_val > 0.80:
         threat_detected = True
-        threat_type = max_threat_type
-    else:
+        threat_type = "adult_content"
+    elif payload.violence_score > 0.80:
+        threat_detected = True
+        threat_type = "violence"
+    elif payload.hate_speech_score > 0.80:
+        threat_detected = True
+        threat_type = "hate_speech"
+    elif payload.weapons_score > 0.75:
+        threat_detected = True
+        threat_type = "weapons"
+
+    # Safety Threshold Gate
+    if not threat_detected:
         return ThreatTriggerResponse(
             threat_detected=False,
             threat_type="none",
@@ -246,6 +269,48 @@ def get_parent_dashboard_data(child_age: Optional[int] = None):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve dashboard history: {e}")
+
+@app.get("/api/guard/state")
+def get_guard_state():
+    """
+    Returns the complete real-time state of the Zero-Trust Guard pipeline.
+    """
+    return guard_system.get_state()
+
+@app.post("/api/guard/toggle")
+def toggle_guard_simulation(payload: GuardToggleRequest):
+    """
+    Toggles between Simulation Mode and Live Mode.
+    """
+    guard_system.set_simulation_mode(payload.simulation_mode)
+    return {"status": "ok", "simulation_mode": payload.simulation_mode}
+
+@app.post("/api/guard/toggle-monitor")
+def toggle_guard_monitor(payload: GuardMonitorRequest):
+    """
+    Toggles active background scanning.
+    """
+    if payload.active:
+        guard_system.start()
+    else:
+        guard_system.stop()
+    return {"status": "ok", "active": payload.active}
+
+@app.post("/api/guard/process-frame")
+def process_custom_frame(payload: FrameAnalysisRequest):
+    """
+    Accepts a base64 encoded frame from an uploaded/playing video in the browser,
+    runs process scanners, scene-change differencing, and object detections.
+    """
+    return guard_system.process_custom_frame(payload.image_b64, payload.filename)
+
+@app.post("/api/guard/reset")
+def reset_guard_state():
+    """
+    Resets the state of the Zero-Trust Guard.
+    """
+    guard_system.reset()
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
