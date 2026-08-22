@@ -68,6 +68,7 @@ export default function ParentDashboard() {
   // Personas list state
   const [personas, setPersonas] = useState<ChildPersona[]>([]);
   const [activePersonaId, setActivePersonaId] = useState<string>("sandeep");
+  const activePersona = personas.find(p => p.id === activePersonaId) || personas[0] || DEFAULT_PERSONAS[0];
   
   // Profile Editor state
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -85,6 +86,10 @@ export default function ParentDashboard() {
   const [backendData, setBackendData] = useState<{
     analyst_runs: any[];
     socratic_sessions: any[];
+    content_intercepted?: number;
+    high_severity_alerts?: number;
+    hate_speech_detected?: number;
+    screen_time_minutes?: number;
   } | null>(null);
   const [backendAvailable, setBackendAvailable] = useState<boolean>(false);
 
@@ -93,7 +98,7 @@ export default function ParentDashboard() {
     let active = true;
     const fetchData = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/parent/dashboard-data`);
+        const res = await fetch(`${BACKEND_URL}/api/parent/dashboard-data?child_age=${activePersona.age}`);
         if (!res.ok) throw new Error("Backend connection failed");
         const data = await res.json();
         if (active) {
@@ -114,7 +119,7 @@ export default function ParentDashboard() {
       active = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [activePersona.age]);
 
   // Initialize personas from localStorage or defaults
   useEffect(() => {
@@ -134,9 +139,6 @@ export default function ParentDashboard() {
       localStorage.setItem("socratic_parent_personas", JSON.stringify(DEFAULT_PERSONAS));
     }
   }, []);
-
-  const activePersona = personas.find(p => p.id === activePersonaId) || personas[0] || DEFAULT_PERSONAS[0];
-
   // Set edit form values when editing starts or active persona changes
   useEffect(() => {
     if (activePersona) {
@@ -209,85 +211,85 @@ export default function ParentDashboard() {
   const getMetrics = () => {
     const defaults = activePersona.age <= 10
       ? {
-          intercepts: 24,
-          interceptsTrend: "↓ 12% vs yesterday",
-          alerts: 3,
-          alertsTrend: "↓ 25% vs yesterday",
-          hateSpeech: 7,
-          hateSpeechTrend: "↓ 8% vs yesterday",
-          screenTime: "2h 45m",
-          screenTimeTrend: "↓ 15% vs yesterday",
+          intercepts: 0,
+          interceptsTrend: "Polling...",
+          alerts: 0,
+          alertsTrend: "Polling...",
+          hateSpeech: 0,
+          hateSpeechTrend: "Polling...",
+          screenTime: "0m",
+          screenTimeTrend: "Polling...",
           anomalyScore: 0.28,
-          threats: { violence: 8, hate: 6, adult: 5, controversial: 3, other: 2 }
+          threats: { violence: 0, hate: 0, adult: 0, controversial: 0, other: 0 }
         }
       : {
-          intercepts: 41,
-          interceptsTrend: "↑ 8% vs yesterday",
-          alerts: 6,
-          alertsTrend: "↓ 10% vs yesterday",
-          hateSpeech: 12,
-          hateSpeechTrend: "↑ 14% vs yesterday",
-          screenTime: "4h 20m",
-          screenTimeTrend: "↑ 5% vs yesterday",
+          intercepts: 0,
+          interceptsTrend: "Polling...",
+          alerts: 0,
+          alertsTrend: "Polling...",
+          hateSpeech: 0,
+          hateSpeechTrend: "Polling...",
+          screenTime: "0m",
+          screenTimeTrend: "Polling...",
           anomalyScore: 0.54,
-          threats: { violence: 10, hate: 15, adult: 9, controversial: 5, other: 2 }
+          threats: { violence: 0, hate: 0, adult: 0, controversial: 0, other: 0 }
         };
 
     if (backendAvailable && backendData) {
       const runsForChild = (backendData.analyst_runs || []).filter(r => r.child_age === activePersona.age);
       const sessionsForChild = (backendData.socratic_sessions || []).filter(s => s.child_age === activePersona.age);
 
-      if (runsForChild.length > 0 || sessionsForChild.length > 0) {
-        const realHateSpeechCount = runsForChild.filter(r => r.decision === "hate" && r.category === "hate_speech").length;
-        const realInterceptsCount = sessionsForChild.length;
-        const realAlertsCount = runsForChild.filter(r => r.decision === "hate").length;
-
-        const threats = { violence: 0, hate: 0, adult: 0, controversial: 0, other: 0 };
-        runsForChild.forEach(r => {
-          if (r.decision === "hate") {
-            const cat = r.category || "";
-            if (cat.includes("violence")) threats.violence++;
-            else if (cat.includes("hate")) threats.hate++;
-            else if (cat.includes("adult")) threats.adult++;
-            else if (cat.includes("controversial")) threats.controversial++;
-            else threats.other++;
-          }
-        });
-        sessionsForChild.forEach(s => {
-          const tType = s.threat_type || "";
-          if (tType.includes("violence")) threats.violence++;
-          else if (tType.includes("hate")) threats.hate++;
-          else if (tType.includes("adult")) threats.adult++;
-          else if (tType.includes("controversial")) threats.controversial++;
+      const threats = { violence: 0, hate: 0, adult: 0, controversial: 0, other: 0 };
+      runsForChild.forEach(r => {
+        if (r.decision === "hate") {
+          const cat = r.category || "";
+          if (cat.includes("violence")) threats.violence++;
+          else if (cat.includes("hate")) threats.hate++;
+          else if (cat.includes("adult")) threats.adult++;
+          else if (cat.includes("controversial")) threats.controversial++;
           else threats.other++;
-        });
-
-        let anomalyScore = defaults.anomalyScore;
-        const allEmotions: string[] = [];
-        sessionsForChild.forEach(s => {
-          (s.turns || []).forEach((t: any) => {
-            if (t.child_emotion) allEmotions.push(t.child_emotion.toLowerCase());
-          });
-        });
-        if (allEmotions.length > 0) {
-          const negativeCount = allEmotions.filter(e => ["scared", "defensive", "frustrated", "angry"].includes(e)).length;
-          anomalyScore = parseFloat((negativeCount / allEmotions.length).toFixed(2));
-          anomalyScore = Math.max(0.1, Math.min(0.95, anomalyScore));
         }
+      });
+      sessionsForChild.forEach(s => {
+        const tType = s.threat_type || "";
+        if (tType.includes("violence")) threats.violence++;
+        else if (tType.includes("hate")) threats.hate++;
+        else if (tType.includes("adult")) threats.adult++;
+        else if (tType.includes("controversial")) threats.controversial++;
+        else threats.other++;
+      });
 
-        return {
-          intercepts: realInterceptsCount,
-          interceptsTrend: realInterceptsCount > 0 ? "Real-time count" : defaults.interceptsTrend,
-          alerts: realAlertsCount,
-          alertsTrend: realAlertsCount > 0 ? "Real-time count" : defaults.alertsTrend,
-          hateSpeech: realHateSpeechCount,
-          hateSpeechTrend: realHateSpeechCount > 0 ? "Real-time count" : defaults.hateSpeechTrend,
-          screenTime: defaults.screenTime,
-          screenTimeTrend: defaults.screenTimeTrend,
-          anomalyScore: anomalyScore,
-          threats: threats
-        };
+      let anomalyScore = defaults.anomalyScore;
+      const allEmotions: string[] = [];
+      sessionsForChild.forEach(s => {
+        (s.turns || []).forEach((t: any) => {
+          if (t.child_emotion) allEmotions.push(t.child_emotion.toLowerCase());
+        });
+      });
+      if (allEmotions.length > 0) {
+        const negativeCount = allEmotions.filter(e => ["scared", "defensive", "frustrated", "angry"].includes(e)).length;
+        anomalyScore = parseFloat((negativeCount / allEmotions.length).toFixed(2));
+        anomalyScore = Math.max(0.1, Math.min(0.95, anomalyScore));
       }
+
+      // Read real-time values from the backend response
+      const realInterceptsCount = backendData.content_intercepted ?? 0;
+      const realAlertsCount = backendData.high_severity_alerts ?? 0;
+      const realHateSpeechCount = backendData.hate_speech_detected ?? 0;
+      const realScreenTimeMinutes = backendData.screen_time_minutes ?? 0;
+
+      return {
+        intercepts: realInterceptsCount,
+        interceptsTrend: "Real-time count",
+        alerts: realAlertsCount,
+        alertsTrend: "Real-time count",
+        hateSpeech: realHateSpeechCount,
+        hateSpeechTrend: "Real-time count",
+        screenTime: `${realScreenTimeMinutes}m`,
+        screenTimeTrend: "Real-time count",
+        anomalyScore: anomalyScore,
+        threats: threats
+      };
     }
 
     return defaults;
@@ -300,82 +302,92 @@ export default function ParentDashboard() {
       .filter(s => s.child_age === activePersona.age)
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-    const emotionTurns: { emotion: string; timeStr: string }[] = [];
+    // 1. Group all turns by day string (e.g. "18 Aug")
+    const dayGroups: { [dateStr: string]: { positive: number; neutral: number; negative: number; dateObj: Date } } = {};
+
     sessions.forEach(session => {
+      if (!session.timestamp) return;
+      const date = new Date(session.timestamp);
+      if (isNaN(date.getTime())) return;
+      
+      const day = date.getDate();
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const dateStr = `${day} ${monthNames[date.getMonth()]}`;
+
+      if (!dayGroups[dateStr]) {
+        dayGroups[dateStr] = { positive: 0, neutral: 0, negative: 0, dateObj: date };
+      }
+
       (session.turns || []).forEach((turn: any) => {
-        if (turn.child_emotion && turn.child_emotion !== "none") {
-          emotionTurns.push({
-            emotion: turn.child_emotion.toLowerCase(),
-            timeStr: turn.time_str || ""
-          });
+        const emo = (turn.child_emotion || "").toLowerCase();
+        if (!emo || emo === "none") return;
+
+        if (["resolved", "compliant", "happy", "reflective", "curious", "positive"].includes(emo)) {
+          dayGroups[dateStr].positive++;
+        } else if (["scared", "defensive", "frustrated", "angry", "negative"].includes(emo)) {
+          dayGroups[dateStr].negative++;
+        } else if (["neutral", "unknown", "unclear"].includes(emo)) {
+          dayGroups[dateStr].neutral++;
         }
       });
     });
 
-    if (emotionTurns.length === 0) return null;
+    const sortedDateStrs = Object.keys(dayGroups).sort((a, b) => {
+      return dayGroups[a].dateObj.getTime() - dayGroups[b].dateObj.getTime();
+    });
 
-    const recentTurns = emotionTurns.slice(-7);
-    while (recentTurns.length < 7 && recentTurns.length > 0) {
-      recentTurns.unshift({ emotion: "neutral", timeStr: "Start" });
-    }
+    // Limit to the last 7 days of historical data
+    const last7Days = sortedDateStrs.slice(-7);
+
+    if (last7Days.length === 0) return null;
 
     const emotionToY = (emo: string): number => {
       switch (emo) {
-        case "resolved":
-        case "compliant":
-        case "happy":
-          return 20;
-        case "reflective":
-        case "curious":
-          return 50;
+        case "positive":
+          return 50; // maps to Positive line
+        case "negative":
+          return 110; // maps to Negative line
         case "neutral":
-        case "unknown":
-        case "unclear":
-          return 80;
-        case "scared":
-        case "defensive":
-          return 110;
-        case "frustrated":
-        case "angry":
-          return 140;
         default:
-          return 80;
+          return 80; // maps to Neutral line
       }
     };
 
     const emotionToColor = (emo: string): string => {
       switch (emo) {
-        case "resolved":
-        case "compliant":
-        case "happy":
-        case "reflective":
-        case "curious":
+        case "positive":
           return "#10B981";
-        case "neutral":
-        case "unknown":
-        case "unclear":
-          return "#F59E0B";
-        case "scared":
-        case "defensive":
-        case "frustrated":
-        case "angry":
+        case "negative":
           return "#F43F5E";
+        case "neutral":
         default:
           return "#F59E0B";
       }
     };
 
-    const points = recentTurns.map((turn, idx) => {
-      const x = recentTurns.length > 1
-        ? 10 + idx * (280 / (recentTurns.length - 1))
+    const points = last7Days.map((dateStr, idx) => {
+      const group = dayGroups[dateStr];
+      let dominant: "positive" | "neutral" | "negative" = "neutral";
+      
+      if (group.positive > group.neutral && group.positive > group.negative) {
+        dominant = "positive";
+      } else if (group.negative > group.positive && group.negative > group.neutral) {
+        dominant = "negative";
+      } else if (group.positive === group.negative && group.positive > 0) {
+        dominant = "neutral";
+      }
+
+      const x = last7Days.length > 1
+        ? 10 + idx * (280 / (last7Days.length - 1))
         : 150;
-      const y = emotionToY(turn.emotion);
+      const y = emotionToY(dominant);
+
       return {
         x,
         y,
-        color: emotionToColor(turn.emotion),
-        emotion: turn.emotion,
-        timeStr: turn.timeStr
+        color: emotionToColor(dominant),
+        emotion: dominant.charAt(0).toUpperCase() + dominant.slice(1),
+        timeStr: dateStr
       };
     });
 
@@ -522,29 +534,32 @@ export default function ParentDashboard() {
   };
 
   const metrics = getMetrics();
-  const totalThreats = Object.values(metrics.threats).reduce((a, b) => a + b, 0);
+  const totalThreats = Object.values(metrics.threats || {}).reduce((a, b) => a + b, 0);
 
   // Custom SVG donut chart segments calculation
   const getDonutSegments = () => {
     let currentOffset = 0;
+    const threats = metrics.threats || { violence: 0, hate: 0, adult: 0, controversial: 0, other: 0 };
     const categories = [
-      { name: "High Violence", count: metrics.threats.violence, color: "#F43F5E" },
-      { name: "Hate Speech", count: metrics.threats.hate, color: "#F59E0B" },
-      { name: "Adult Content", count: metrics.threats.adult, color: "#A855F7" },
-      { name: "Controversial", count: metrics.threats.controversial, color: "#10B981" },
-      { name: "Other", count: metrics.threats.other, color: "#3B82F6" },
+      { name: "High Violence", count: Number(threats.violence || 0), color: "#F43F5E" },
+      { name: "Hate Speech", count: Number(threats.hate || 0), color: "#F59E0B" },
+      { name: "Adult Content", count: Number(threats.adult || 0), color: "#A855F7" },
+      { name: "Controversial", count: Number(threats.controversial || 0), color: "#10B981" },
+      { name: "Other", count: Number(threats.other || 0), color: "#3B82F6" },
     ];
     
+    const sumThreats = categories.reduce((sum, cat) => sum + cat.count, 0);
+    
     return categories.map(cat => {
-      const percentage = (cat.count / totalThreats) * 100;
-      const strokeLength = (percentage / 100) * 314.16;
+      const percentage = sumThreats > 0 ? (cat.count / sumThreats) * 100 : 0;
+      const strokeLength = sumThreats > 0 ? (percentage / 100) * 314.16 : 0;
       const strokeOffset = 314.16 - strokeLength + currentOffset;
       currentOffset -= strokeLength;
       return {
         ...cat,
-        percentage: Math.round(percentage),
+        percentage: sumThreats > 0 ? Math.round(percentage) : 0,
         strokeLength,
-        strokeOffset
+        strokeOffset: isNaN(strokeOffset) || !isFinite(strokeOffset) ? 314.16 : strokeOffset
       };
     });
   };
@@ -844,7 +859,7 @@ export default function ParentDashboard() {
                 </div>
 
                 {/* Row 2: Analytics Visualizations */}
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   
                   {/* Threat Category Summary Circular SVG Chart */}
                   <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col">
@@ -919,7 +934,7 @@ export default function ParentDashboard() {
 
                         {/* SVG Line path & points */}
                         <svg className="w-full h-full pl-12 overflow-visible" viewBox="0 0 300 160" preserveAspectRatio="none">
-                          {emotionTrend ? (
+                          {emotionTrend && (
                             <>
                               <path
                                 d={emotionTrend.pathD}
@@ -933,62 +948,16 @@ export default function ParentDashboard() {
                                 <circle key={idx} cx={pt.x} cy={pt.y} r="4.5" fill={pt.color} />
                               ))}
                             </>
-                          ) : (
-                            <>
-                              <path
-                                d={
-                                  activePersona.age <= 10
-                                    ? "M 10 30 L 58 10 L 106 30 L 154 130 L 202 90 L 250 10 L 290 30"
-                                    : "M 10 90 L 58 70 L 106 90 L 154 130 L 202 110 L 250 50 L 290 90"
-                                }
-                                fill="none"
-                                stroke="#5A5A40"
-                                strokeWidth="2.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                              {activePersona.age <= 10 ? (
-                                <>
-                                  <circle cx="10" cy="30" r="4.5" fill="#10B981" />
-                                  <circle cx="58" cy="10" r="4.5" fill="#10B981" />
-                                  <circle cx="106" cy="30" r="4.5" fill="#10B981" />
-                                  <circle cx="154" cy="130" r="4.5" fill="#F43F5E" />
-                                  <circle cx="202" cy="90" r="4.5" fill="#F59E0B" />
-                                  <circle cx="250" cy="10" r="4.5" fill="#10B981" />
-                                  <circle cx="290" cy="30" r="4.5" fill="#10B981" />
-                                </>
-                              ) : (
-                                <>
-                                  <circle cx="10" cy="90" r="4.5" fill="#F59E0B" />
-                                  <circle cx="58" cy="70" r="4.5" fill="#10B981" />
-                                  <circle cx="106" cy="90" r="4.5" fill="#F59E0B" />
-                                  <circle cx="154" cy="130" r="4.5" fill="#F43F5E" />
-                                  <circle cx="202" cy="110" r="4.5" fill="#F59E0B" />
-                                  <circle cx="250" cy="50" r="4.5" fill="#10B981" />
-                                  <circle cx="290" cy="90" r="4.5" fill="#F59E0B" />
-                                </>
-                              )}
-                            </>
                           )}
                         </svg>
                       </div>
 
                       {/* X-axis Labels */}
                       <div className="flex justify-between pl-12 text-[10px] text-[#6B705C] font-semibold mt-2">
-                        {emotionTrend ? (
+                        {emotionTrend && (
                           emotionTrend.points.map((pt, idx) => (
                             <span key={idx}>{pt.timeStr}</span>
                           ))
-                        ) : (
-                          <>
-                            <span>6 Aug</span>
-                            <span>7 Aug</span>
-                            <span>8 Aug</span>
-                            <span>9 Aug</span>
-                            <span>10 Aug</span>
-                            <span>11 Aug</span>
-                            <span>12 Aug</span>
-                          </>
                         )}
                       </div>
                     </div>
@@ -1003,77 +972,6 @@ export default function ParentDashboard() {
                       <span className="flex items-center gap-1 text-[#F43F5E] font-bold">
                         <span className="w-2 h-2 rounded-full bg-[#F43F5E]" /> Negative
                       </span>
-                    </div>
-                  </div>
-
-                  {/* Behavior Anomaly Score SVG Gauge */}
-                  <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col">
-                    <h3 className="font-semibold text-xs uppercase tracking-wider text-[#6B705C] border-b border-[#DDE0D0] pb-2 mb-4">
-                      Behavior Anomaly Score <span className="text-[10px] lowercase font-normal">(Isolation Forest)</span>
-                    </h3>
-
-                    <div className="flex-1 flex flex-col items-center justify-center py-4">
-                      <div className="relative w-44 h-24 flex flex-col items-center justify-end overflow-hidden">
-                        
-                        {/* Speedometer SVG Arc */}
-                        <svg className="w-full h-full" viewBox="0 0 100 50">
-                          {/* Background Arc */}
-                          <path
-                            d="M 10 45 A 40 40 0 0 1 90 45"
-                            fill="none"
-                            stroke="#E6E8E0"
-                            strokeWidth="8"
-                            strokeLinecap="round"
-                          />
-                          {/* Value Arc colored base on score */}
-                          <path
-                            d="M 10 45 A 40 40 0 0 1 90 45"
-                            fill="none"
-                            stroke={metrics.anomalyScore > 0.85 ? "#F43F5E" : metrics.anomalyScore > 0.5 ? "#F59E0B" : "#10B981"}
-                            strokeWidth="8"
-                            strokeLinecap="round"
-                            strokeDasharray={125.66}
-                            strokeDashoffset={125.66 * (1 - metrics.anomalyScore)}
-                            className="transition-all duration-500"
-                          />
-                          {/* Threshold Dash (0.85 of half-circle which is 180deg) */}
-                          <line
-                            x1="50"
-                            y1="45"
-                            x2={50 + 40 * Math.cos(Math.PI * (1 - 0.85))}
-                            y2={45 - 40 * Math.sin(Math.PI * (1 - 0.85))}
-                            stroke="#EF4444"
-                            strokeWidth="1.5"
-                            strokeDasharray="2,2"
-                          />
-                        </svg>
-
-                        {/* Needle pointing at score */}
-                        <div
-                          className="absolute bottom-1 origin-bottom w-1 h-14 bg-slate-800 rounded-full transition-transform duration-500"
-                          style={{
-                            transform: `rotate(${(metrics.anomalyScore * 180) - 90}deg)`,
-                          }}
-                        />
-                        <div className="w-3 h-3 rounded-full bg-slate-800 absolute bottom-0" />
-                      </div>
-                      
-                      {/* Metric Values */}
-                      <div className="text-center mt-3 flex flex-col">
-                        <span className="text-2xl font-bold text-[#2D3025]">{metrics.anomalyScore}</span>
-                        <span className={`text-xs font-bold ${
-                          metrics.anomalyScore > 0.85
-                            ? "text-rose-600"
-                            : metrics.anomalyScore > 0.5
-                            ? "text-orange-600"
-                            : "text-emerald-700"
-                        }`}>
-                          {metrics.anomalyScore > 0.85 ? "Abnormal Behavior Flagged" : metrics.anomalyScore > 0.5 ? "Elevated Variance" : "Normal Behavior"}
-                        </span>
-                        <span className="text-[10px] text-[#6B705C] font-semibold mt-1">
-                          Risk Threshold: 0.85
-                        </span>
-                      </div>
                     </div>
                   </div>
 

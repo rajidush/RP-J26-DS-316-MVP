@@ -447,6 +447,7 @@ export default function SocraticPrototype() {
     setUserInput("");
     setLoadingTurn(true);
     setApiError(null);
+    setChildEmotion("Analyzing...");
 
     // Append child response
     const nextHistory = [...chatHistory, { role: "user" as const, content: childText }];
