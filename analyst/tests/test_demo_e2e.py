@@ -16,8 +16,11 @@ from analyst.stage2.fusion import TEXT_WEIGHT, VISION_WEIGHT, fuse, fusion_detai
 
 class FusionMathTests(unittest.TestCase):
     def test_weighted_average(self):
-        self.assertAlmostEqual(fuse(1.0, 0.0), TEXT_WEIGHT, places=4)
-        self.assertAlmostEqual(fuse(0.0, 1.0), VISION_WEIGHT, places=4)
+        # Vision inactive must not dilute text
+        self.assertAlmostEqual(fuse(1.0, 0.0), 1.0, places=4)
+        self.assertAlmostEqual(fuse(0.0, 1.0), 1.0, places=4)
+        both = fuse(0.8, 0.8)
+        self.assertGreater(both, 0.0)
 
     def test_meme_bump_when_both_mid(self):
         bumped = fuse(0.5, 0.5)
@@ -29,8 +32,12 @@ class FusionMathTests(unittest.TestCase):
         self.assertEqual(detail["fused"], bumped)
 
     def test_no_bump_when_one_low(self):
-        self.assertAlmostEqual(fuse(0.9, 0.1), TEXT_WEIGHT * 0.9 + VISION_WEIGHT * 0.1, places=4)
+        # Strong text + mild vision keeps text floor
+        self.assertAlmostEqual(fuse(0.9, 0.1), 0.9, places=4)
         self.assertFalse(fusion_detail(0.9, 0.1)["meme_bump"])
+
+    def test_strong_text_not_diluted(self):
+        self.assertGreaterEqual(fuse(0.88, 0.2), 0.88)
 
 
 class DemoRunnerTests(unittest.TestCase):

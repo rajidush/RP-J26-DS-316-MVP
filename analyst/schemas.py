@@ -101,12 +101,22 @@ class AnalystRunResult(BaseModel):
     cleared: Optional[HateClearedPayload] = None
     ocr_text: str = ""
     transcript: str = ""
+    # What the vision branch saw. Kept separate from ocr_text so the panel
+    # can answer "what does the picture mean" and "what words are in it".
+    image_caption: str = ""
+    image_text: str = ""
+    image_region: Optional[List[int]] = None
     stage1: Dict[str, float] = Field(default_factory=dict)
     stage2: Optional[Dict[str, float]] = None
     backends: Dict[str, str] = Field(default_factory=dict)
     media_deleted: bool = True
     notes: List[str] = Field(default_factory=list)
     latency_ms: Dict[str, float] = Field(default_factory=dict)
+    modalities: Dict[str, float] = Field(default_factory=dict)
+    risk_score: float = 0.0
+    explanation: str = ""
+    protection_state: Literal["protected", "reviewing", "threat", "degraded"] = "protected"
+    lexicon_hits: List[str] = Field(default_factory=list)
 
 
 CHILD_SAFE_SUMMARIES: Dict[str, str] = {

@@ -45,7 +45,6 @@ def map_category(raw: str) -> Category:
     }
     if raw in allowed:
         return raw  # type: ignore[return-value]
-    # legacy names from earlier lexicon
     legacy = {
         "cyberbullying": "bullying",
         "identity_attack": "hate_identity",
@@ -64,6 +63,39 @@ def recommended_action(category: Category, score: float) -> RecommendedAction:
     return "notify_only"
 
 
+def modality_weights(
+    text_score: float,
+    vision_score: float,
+    ocr_text: str,
+    transcript: str,
+) -> Modalities:
+    """Split contribution across text / image / audio for the panel.
+
+    Prior bug: OCR+ASR together zeroed audio weight. Fixed by splitting the
+    text-channel score across OCR and ASR when both are present.
+    """
+    t = max(0.0, float(text_score))
+    v = max(0.0, float(vision_score))
+    has_ocr = bool((ocr_text or "").strip())
+    has_asr = bool((transcript or "").strip())
+
+    if has_asr and has_ocr:
+        text_part, audio_part, image_part = 0.55 * t, 0.45 * t, v
+    elif has_asr and not has_ocr:
+        text_part, audio_part, image_part = 0.0, t, v
+    else:
+        text_part, audio_part, image_part = t, 0.0, v
+
+    total = text_part + audio_part + image_part
+    if total < 1e-6:
+        return Modalities(text=0.0, image=0.0, audio=0.0)
+    return Modalities(
+        text=round(text_part / total, 3),
+        image=round(image_part / total, 3),
+        audio=round(audio_part / total, 3),
+    )
+
+
 def decide(
     *,
     text_score: float,
@@ -78,25 +110,18 @@ def decide(
     app_exe: str = "unknown",
     app_category: str = "other",
     corr: Optional[str] = None,
-) -> Tuple[str, Optional[Envelope], Optional[HateDetectedPayload], Optional[HateClearedPayload]]:
+) -> Tuple[str, Optional[Envelope], Optional[HateDetectedPayload], Optional[HateClearedPayload], Modalities]:
     persona = persona_for_age(child_age)
     theta2 = PERSONA_THETA2[persona]
     cat = map_category(category)
-
-    text_w = text_score / max(text_score + vision_score, 1e-6)
-    image_w = vision_score / max(text_score + vision_score, 1e-6)
-    audio_w = 0.0
-    if transcript and not ocr_text:
-        audio_w = 0.5
-        text_w = 0.5
-        image_w = 0.0
+    mods = modality_weights(text_score, vision_score, ocr_text, transcript)
 
     if escalated and fused_score >= theta2 and cat != "none":
         payload = HateDetectedPayload(
             score=round(fused_score, 4),
             category=cat,
-            stage=2 if escalated else 1,
-            modalities=Modalities(text=round(text_w, 3), image=round(image_w, 3), audio=round(audio_w, 3)),
+            stage=2,
+            modalities=mods,
             app={"exe": app_exe, "category": app_category},
             evidence=Evidence(
                 ocr_snippet=(ocr_text or "")[:200],
@@ -112,13 +137,20 @@ def decide(
             corr=corr or new_id(),
             payload=payload.model_dump(),
         )
-        return "hate", env, payload, None
+        return "hate", env, payload, None, mods
 
-    cleared = None
-    if escalated and fused_score < theta2:
+    if escalated:
         cleared = HateClearedPayload(
             stage1_score=round(max(text_score, vision_score), 4),
             stage2_score=round(fused_score, 4),
-            reason="below_persona_threshold",
+            reason="below_persona_threshold" if fused_score < theta2 else "category_none",
         )
-    return "not-hate", None, None, cleared
+        env = Envelope(
+            topic="hate.cleared",
+            corr=corr or new_id(),
+            payload=cleared.model_dump(),
+        )
+        return "not-hate", env, None, cleared, mods
+
+    # Stopped at stage 1: nothing escalated, so there is no false positive to report.
+    return "not-hate", None, None, None, mods
