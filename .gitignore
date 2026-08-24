@@ -18,6 +18,8 @@ analyst/models/*.onnx
 analyst/models/*.bin
 analyst/models/*.pt
 analyst/models/*.gguf
+analyst/evaluation/demo_e2e_report.md
+analyst/data/
 **/dashboard_history.json
 
 offline_backend/dashboard_history.json

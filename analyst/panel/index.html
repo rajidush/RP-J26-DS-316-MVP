@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Guardian Analyst</title>
+  <style>
+    :root, [data-theme="light"] {
+      --bg: #f0f0f0;
+      --main: #ffffff;
+      --sidebar: #ececec;
+      --line: #d8d8d8;
+      --text: #333333;
+      --muted: #666666;
+      --teal: #0096a6;
+      --teal-hover: #007a87;
+      --green: #2eb82e;
+      --red: #d32f2f;
+      --orange: #e6a100;
+      --font: "Segoe UI", "Source Sans 3", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+      --mono: Consolas, "SF Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+      --sidebar-w: 200px;
+    }
+    [data-theme="dark"] {
+      --bg: #1a1a1a;
+      --main: #252525;
+      --sidebar: #2d2d2d;
+      --line: #404040;
+      --text: #e8e8e8;
+      --muted: #aaaaaa;
+      --teal: #2bb8c9;
+      --teal-hover: #3dccdd;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { font-family: var(--font); font-size: 14px; color: var(--text); background: var(--bg); }
+
+    .app {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      grid-template-rows: 1fr auto;
+      min-height: 100vh;
+    }
+    .sidebar {
+      grid-row: 1 / 3;
+      background: var(--sidebar);
+      border-right: 1px solid var(--line);
+      padding: 1rem 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .brand {
+      padding: 0 1rem 1rem;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--teal);
+    }
+    .brand small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+
+    .nav button {
+      width: 100%; border: 0; background: transparent;
+      text-align: left; font: inherit; font-size: 14px;
+      padding: 0.55rem 1rem; cursor: pointer; color: var(--text);
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .nav button:hover { background: rgba(0,0,0,0.04); }
+    [data-theme="dark"] .nav button:hover { background: rgba(255,255,255,0.05); }
+    .nav button.active { color: var(--teal); font-weight: 600; }
+    .nav .ico { width: 20px; height: 20px; opacity: 0.75; flex-shrink: 0; }
+
+    .sidebar-foot {
+      margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--line);
+      font-size: 11px; color: var(--muted);
+    }
+    .theme-btns { display: flex; gap: 4px; margin-top: 6px; }
+    .theme-btns button {
+      flex: 1; border: 1px solid var(--line); background: var(--main);
+      padding: 4px 0; font-size: 11px; cursor: pointer; border-radius: 3px;
+    }
+    .theme-btns button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
+
+    .main {
+      background: var(--main);
+      padding: 1.25rem 1.5rem 1rem;
+      overflow: auto;
+    }
+    .page-head {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line);
+    }
+    .page-head h2 { margin: 0; font-size: 22px; font-weight: 400; color: var(--text); }
+
+    .view { display: none; }
+    .view.active { display: block; }
+
+    /* Overview — ESET status block */
+    .overview-status {
+      display: flex; align-items: center; gap: 1.5rem;
+      padding: 1.5rem 0 1.25rem; margin-bottom: 0.5rem;
+    }
+    .shield-lg {
+      width: 72px; height: 72px; flex-shrink: 0;
+      border-radius: 50%; border: 3px solid var(--green);
+      display: grid; place-items: center; background: var(--main);
+    }
+    .shield-lg svg { width: 36px; height: 36px; fill: var(--green); }
+    .overview-status.threat .shield-lg { border-color: var(--red); }
+    .overview-status.threat .shield-lg svg { fill: var(--red); }
+    .overview-status.warn .shield-lg { border-color: var(--orange); }
+    .overview-status.warn .shield-lg svg { fill: var(--orange); }
+    .overview-status h3 { margin: 0; font-size: 20px; font-weight: 600; color: var(--green); }
+    .overview-status.threat h3 { color: var(--red); }
+    .overview-status.warn h3 { color: var(--orange); }
+    .overview-status p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 420px; }
+    .overview-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      border: 1px solid var(--line); background: var(--main);
+      padding: 6px 14px; font: inherit; font-size: 13px; cursor: pointer; border-radius: 3px;
+    }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .btn-teal { background: var(--teal); color: #fff; border-color: var(--teal); }
+    .btn-teal:hover:not(:disabled) { background: var(--teal-hover); }
+
+    .mod-row {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      margin-bottom: 1rem;
+    }
+    @media (max-width: 800px) { .mod-row { grid-template-columns: 1fr 1fr; } }
+    .mod-cell {
+      padding: 0.75rem 1rem; border-right: 1px solid var(--line);
+      font-size: 12px;
+    }
+    .mod-cell:last-child { border-right: 0; }
+    .mod-cell b { display: block; font-size: 13px; margin-bottom: 2px; }
+    .mod-cell span { color: var(--muted); }
+    .mod-cell.ok b { color: var(--green); }
+    .mod-cell.warn b { color: var(--orange); }
+
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+    .section-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 0.5rem; font-weight: 600; }
+    .ev-line { margin: 0 0 0.65rem; font-size: 13px; }
+    .ev-line label { display: block; color: var(--teal); font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+    .ev-line pre, .ev-line p { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+    .bars { margin: 0.5rem 0 0.75rem; }
+    .bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
+    .bar i { width: 48px; color: var(--muted); font-style: normal; }
+    .bar-track { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+    .bar-fill { height: 100%; background: var(--teal); border-radius: 3px; }
+    .bar-fill.img { background: var(--orange); }
+    .bar-fill.aud { background: #4a90c4; }
+    .bar em { width: 36px; text-align: right; font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+    .thumb { max-width: 100%; max-height: 100px; border-radius: 4px; border: 1px solid var(--line); margin-top: 6px; }
+    .timeline { list-style: none; margin: 0; padding: 0; }
+    .timeline li {
+      padding: 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px;
+    }
+    .timeline li:hover { color: var(--teal); }
+    .tl-hate { color: var(--red); font-weight: 600; }
+    .tl-ok { color: var(--green); }
+    .tl-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* Tools — ESET grid */
+    .tool-section { border-bottom: 1px solid var(--line); padding: 1rem 0; }
+    .tool-section:first-child { padding-top: 0; }
+    .tool-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+    }
+    @media (max-width: 900px) { .tool-grid { grid-template-columns: 1fr; } }
+    .tool-item {
+      display: grid; grid-template-columns: 56px 1fr; gap: 12px;
+      padding: 1rem 1.25rem 1rem 0; align-items: start;
+      border-right: 1px solid var(--line);
+    }
+    .tool-item:nth-child(3n) { border-right: 0; }
+    @media (max-width: 900px) { .tool-item { border-right: 0; border-bottom: 1px solid var(--line); } }
+    .tool-ico {
+      width: 48px; height: 48px; display: grid; place-items: center;
+      color: var(--muted);
+    }
+    .tool-ico svg { width: 40px; height: 40px; stroke: currentColor; fill: none; stroke-width: 1.2; }
+    .tool-item h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--teal); cursor: pointer; }
+    .tool-item h4:hover { text-decoration: underline; }
+    .tool-item p { margin: 4px 0 0; font-size: 12px; color: var(--muted); line-height: 1.35; }
+    .tool-item.soon h4 { color: var(--muted); cursor: default; }
+    .tool-item.soon h4:hover { text-decoration: none; }
+
+    .setup-grid { max-width: 360px; }
+    .setup-row { margin-bottom: 12px; }
+    .setup-row label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .setup-row input {
+      width: 100%; padding: 6px 8px; border: 1px solid var(--line);
+      border-radius: 3px; font: inherit; background: var(--main); color: var(--text);
+    }
+
+    .err { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 1em; }
+    .warn { color: #b8860b; font-size: 12px; margin-top: 8px; min-height: 1em; }
+
+    .statusbar {
+      grid-column: 2;
+      background: var(--sidebar);
+      border-top: 1px solid var(--line);
+      padding: 4px 1rem;
+      font-size: 11px; color: var(--muted);
+    }
+    .statusbar b { color: var(--green); font-weight: 600; }
+    .statusbar.threat b { color: var(--red); }
+
+
+    /* Pipeline diagram */
+    .dg-wrap { border: 1px solid var(--line); border-radius: 6px; background: var(--main);
+               padding: 14px 16px 10px; margin-bottom: 1rem; overflow-x: auto; }
+    .dg-wrap svg { display: block; width: 100%; min-width: 860px; height: auto; }
+    .dg-box { fill: var(--main); stroke: var(--line); stroke-width: 1.5; }
+    .dg-box.on { stroke: var(--teal); stroke-width: 2; }
+    .dg-box.gated { stroke-dasharray: 5 4; }
+    .dg-band { fill: var(--sidebar); stroke: none; }
+    .dg-t { fill: var(--text); font-size: 12.5px; font-weight: 600; }
+    .dg-m { fill: var(--muted); font-size: 11px; }
+    .dg-mono { fill: var(--teal); font-size: 11px; font-family: var(--mono); }
+    .dg-lbl { fill: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .dg-arrow { stroke: var(--line); stroke-width: 1.5; fill: none; }
+    .dg-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px;
+                 font-size: 11.5px; color: var(--muted); }
+    .dg-legend i { font-style: normal; display: inline-flex; align-items: center; gap: 6px; }
+    .dg-key { width: 16px; height: 0; border-top: 2px solid var(--line); display: inline-block; }
+    .dg-key.g { border-top-style: dashed; }
+    .dg-key.a { border-top-color: var(--teal); }
+    /* Whitebox */
+    .wb-card {
+      border: 1px solid var(--line); border-radius: 4px;
+      padding: 1rem 1.25rem; margin-bottom: 1rem; background: var(--main);
+    }
+    .wb-card h3 { margin: 0 0 4px; font-size: 16px; color: var(--teal); font-weight: 600; }
+    .wb-card p { margin: 0; font-size: 13px; color: var(--muted); }
+    .wb-exe { font-family: var(--mono); font-size: 14px; color: var(--text); margin-top: 6px; }
+    .wb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    @media (max-width: 900px) { .wb-grid { grid-template-columns: 1fr; } }
+    .trace-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .trace-table th {
+      text-align: left; font-size: 11px; color: var(--muted); font-weight: 600;
+      text-transform: uppercase; padding: 6px 8px; border-bottom: 1px solid var(--line);
+    }
+    .trace-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .trace-table tr:last-child td { border-bottom: 0; }
+    .st-ok { color: var(--green); font-weight: 600; }
+    .st-skip { color: var(--muted); }
+    .st-fail { color: var(--red); font-weight: 600; }
+    .st-warn { color: var(--orange); font-weight: 600; }
+    .trace-ms { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: right; white-space: nowrap; }
+    .app-list { list-style: none; margin: 0; padding: 0; }
+    .app-list li {
+      padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+      display: flex; justify-content: space-between; gap: 8px;
+    }
+    .app-list li:last-child { border-bottom: 0; }
+    .app-list code { font-family: var(--mono); color: var(--teal); font-size: 12px; }
+    .tick-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; }
+    .tick-list li {
+      padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; cursor: pointer;
+    }
+    .tick-list li:hover { color: var(--teal); }
+    .tick-list li.on { color: var(--teal); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">Guardian Analyst<small>Child guard</small></div>
+      <nav class="nav">
+        <button type="button" class="active" data-view="overview">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+          Overview
+        </button>
+        <button type="button" data-view="activity">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          Log files
+        </button>
+        <button type="button" data-view="whitebox">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          Whitebox
+        </button>
+        <button type="button" data-view="tools">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          Tools
+        </button>
+        <button type="button" data-view="setup">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          Setup
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        Localhost only
+        <div class="theme-btns">
+          <button type="button" id="themeLight">Light</button>
+          <button type="button" id="themeDark">Dark</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- OVERVIEW -->
+      <section class="view active" id="view-overview">
+        <div class="page-head"><h2 id="pageTitle">Overview</h2></div>
+        <div class="overview-status ok" id="overviewStatus">
+          <div class="shield-lg"><svg viewBox="0 0 24 24"><path d="M12 2l8 3v7c0 5.25-3.4 9.74-8 11-4.6-1.26-8-5.75-8-11V5l8-3zm-1 13.2l-3.2-3.2 1.4-1.4 1.8 1.8 4.4-4.4 1.4 1.4-5.8 5.8z" fill="currentColor" stroke="none"/></svg></div>
+          <div>
+            <h3 id="statusTitle">You are protected</h3>
+            <p id="statusSub">Press Enable to start monitoring.</p>
+          </div>
+          <div class="overview-actions">
+            <button class="btn btn-teal" id="btnStart" type="button">Enable protection</button>
+            <button class="btn" id="btnStop" type="button" disabled>Pause</button>
+          </div>
+        </div>
+        <div class="mod-row" id="modRow">
+          <div class="mod-cell ok" id="mOcr"><b>Screen text</b><span id="mOcrS">—</span></div>
+          <div class="mod-cell ok" id="mAsr"><b>Voice audio</b><span id="mAsrS">—</span></div>
+          <div class="mod-cell ok" id="mClip"><b>Image scan</b><span id="mClipS">—</span></div>
+          <div class="mod-cell ok" id="mText"><b>Text AI</b><span id="mTextS">—</span></div>
+        </div>
+        <div class="split">
+          <div>
+            <p class="section-title">Last scan</p>
+            <div class="bars" id="bars"></div>
+            <div class="ev-line"><label>OCR</label><pre id="ocr">—</pre></div>
+            <div class="ev-line"><label>Speech</label><pre id="asr">—</pre></div>
+            <div class="ev-line"><label>Image meaning</label><pre id="imgCaption">—</pre></div>
+            <div class="ev-line"><label>Text in image</label><pre id="imgText">—</pre></div>
+            <div class="ev-line"><label>Hits</label><p id="hits">—</p></div>
+            <div class="ev-line"><label>Summary</label><p id="summary">—</p></div>
+            <img id="thumb" class="thumb" alt="" hidden />
+            <div class="err" id="err"></div>
+          </div>
+          <div>
+            <p class="section-title">Recent</p>
+            <ul class="timeline" id="timelineHome"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- LOG FILES / ACTIVITY -->
+      <section class="view" id="view-activity">
+        <div class="page-head"><h2>Log files</h2></div>
+        <p class="section-title" id="statsLine">0 events</p>
+        <ul class="timeline" id="timeline"></ul>
+      </section>
+
+      <!-- WHITEBOX -->
+      <section class="view" id="view-whitebox">
+        <div class="page-head"><h2>Whitebox</h2></div>
+        <p style="font-size:13px;color:var(--muted);margin:-0.5rem 0 1rem">See what Guardian scans — app on screen + each pipeline step.</p>
+
+        <p class="section-title">How a tick flows</p>
+        <div class="dg-wrap">
+          <svg viewBox="0 0 980 400" role="img" aria-label="Analyst pipeline dataflow">
+            <rect class="dg-band" x="0" y="52" width="980" height="150" rx="4" opacity=".45"/>
+            <rect class="dg-band" x="0" y="214" width="980" height="74" rx="4" opacity=".45"/>
+
+            <text class="dg-lbl" x="8" y="26">Capture</text>
+            <text class="dg-lbl" x="206" y="26">Extract meaning</text>
+            <text class="dg-lbl" x="418" y="26">Stage 1 &#183; cheap</text>
+            <text class="dg-lbl" x="608" y="26">Stage 2 &#183; only if escalated</text>
+            <text class="dg-lbl" x="814" y="26">Decide</text>
+
+            <rect class="dg-box" id="dgBoxScreen" x="8" y="78" width="168" height="104" rx="5"/>
+            <text class="dg-t" x="22" y="100">Screen frame</text>
+            <text class="dg-mono" id="dgScreen" x="22" y="118">mss</text>
+            <text class="dg-m" x="22" y="140">every 2.5 s tick</text>
+            <text class="dg-m" x="22" y="157">SHA-1 dedupe:</text>
+            <text class="dg-m" x="22" y="173">same frame = skip</text>
+
+            <rect class="dg-box" id="dgBoxAudio" x="8" y="222" width="168" height="60" rx="5"/>
+            <text class="dg-t" x="22" y="243">Speaker loopback</text>
+            <text class="dg-mono" id="dgAudio" x="22" y="261">soundcard</text>
+            <text class="dg-m" x="22" y="276">4 s ring &#183; RMS gate 0.012</text>
+
+            <rect class="dg-box" id="dgBoxOcr" x="206" y="66" width="182" height="56" rx="5"/>
+            <text class="dg-t" x="220" y="88">Text on screen</text>
+            <text class="dg-mono" id="dgOcr" x="220" y="108">rapidocr</text>
+
+            <rect class="dg-box gated" id="dgBoxVlm" x="206" y="132" width="182" height="70" rx="5"/>
+            <text class="dg-t" x="220" y="154">Image meaning</text>
+            <text class="dg-mono" id="dgVlm" x="220" y="174">off</text>
+            <text class="dg-m" x="220" y="192">memes &#183; 384 px &#183; ~1 s</text>
+
+            <rect class="dg-box" id="dgBoxAsr" x="206" y="222" width="182" height="60" rx="5"/>
+            <text class="dg-t" x="220" y="243">Speech to text</text>
+            <text class="dg-mono" id="dgAsr" x="220" y="261">faster-whisper</text>
+            <text class="dg-m" x="220" y="276">only when sound passes gate</text>
+
+            <rect class="dg-box" id="dgBoxS1" x="418" y="118" width="160" height="98" rx="5"/>
+            <text class="dg-t" x="432" y="140">Lexicon screen</text>
+            <text class="dg-mono" id="dgText" x="432" y="160">lexicon</text>
+            <text class="dg-m" x="432" y="181">threshold &#952;1 = 0.35</text>
+            <text class="dg-m" x="432" y="199">below &#8594; stop, no cost</text>
+
+            <rect class="dg-box gated" id="dgBoxS2" x="608" y="118" width="176" height="98" rx="5"/>
+            <text class="dg-t" x="622" y="140">Confirm + fuse</text>
+            <text class="dg-mono" id="dgFull" x="622" y="160">text_full</text>
+            <text class="dg-m" x="622" y="181">text 0.60 / vision 0.40</text>
+            <text class="dg-m" x="622" y="199">meme bump when both mid</text>
+
+            <rect class="dg-box" id="dgBoxDecide" x="814" y="118" width="158" height="98" rx="5"/>
+            <text class="dg-t" x="828" y="140">Persona gate</text>
+            <text class="dg-m" x="828" y="161">8&#8211;10 &#952;2 = 0.55</text>
+            <text class="dg-m" x="828" y="180">11&#8211;13 &#952;2 = 0.65</text>
+            <text class="dg-m" x="828" y="199">14&#8211;15 &#952;2 = 0.75</text>
+
+            <rect class="dg-box" x="8" y="312" width="382" height="56" rx="5"/>
+            <text class="dg-t" x="22" y="334">Raw frame &amp; audio</text>
+            <text class="dg-m" x="22" y="352">RAM only &#8212; zeroed when the tick ends, never on disk</text>
+
+            <rect class="dg-box" x="418" y="312" width="160" height="56" rx="5"/>
+            <text class="dg-t" x="432" y="334">SQLite row</text>
+            <text class="dg-m" x="432" y="352">blurred thumb, 24 h TTL</text>
+
+            <rect class="dg-box" x="608" y="312" width="176" height="56" rx="5"/>
+            <text class="dg-t" x="622" y="334">hate.detected</text>
+            <text class="dg-m" x="622" y="352">child-safe summary &#8594; C3</text>
+
+            <rect class="dg-box" x="814" y="312" width="158" height="56" rx="5"/>
+            <text class="dg-t" x="828" y="334">hate.cleared</text>
+            <text class="dg-m" x="828" y="352">false-positive telemetry</text>
+
+            <defs>
+              <marker id="dgHead" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 Z" fill="var(--line)"/>
+              </marker>
+            </defs>
+            <g marker-end="url(#dgHead)">
+              <path class="dg-arrow" d="M176,104 L200,96"/>
+              <path class="dg-arrow" d="M176,152 L200,162"/>
+              <path class="dg-arrow" d="M176,252 L200,252"/>
+              <path class="dg-arrow" d="M388,94  L412,150"/>
+              <path class="dg-arrow" d="M388,167 L412,167"/>
+              <path class="dg-arrow" d="M388,252 L412,186"/>
+              <path class="dg-arrow" d="M578,167 L602,167"/>
+              <path class="dg-arrow" d="M784,167 L808,167"/>
+              <path class="dg-arrow" d="M696,216 L696,306"/>
+              <path class="dg-arrow" d="M893,216 L893,306"/>
+            </g>
+          </svg>
+
+          <div class="dg-legend">
+            <i><span class="dg-key"></span> runs every tick</i>
+            <i><span class="dg-key g"></span> gated &#8212; escalation, or a picture with no text</i>
+            <i><span class="dg-key a"></span> active in the last tick</i>
+          </div>
+        </div>
+
+
+        <div class="wb-card" id="wbApp">
+          <h3>On screen now</h3>
+          <div class="wb-exe" id="wbExe">—</div>
+          <p id="wbTitle">Enable protection to start.</p>
+        </div>
+
+        <div class="mod-row" id="wbMods">
+          <div class="mod-cell ok"><b>Screen</b><span id="wbScreen">—</span></div>
+          <div class="mod-cell ok"><b>OCR</b><span id="wbOcr">—</span></div>
+          <div class="mod-cell ok"><b>Speech</b><span id="wbAsr">—</span></div>
+          <div class="mod-cell ok"><b>CLIP</b><span id="wbClip">—</span></div>
+        </div>
+
+        <div class="wb-grid">
+          <div>
+            <p class="section-title">Pipeline steps (last tick)</p>
+            <table class="trace-table">
+              <thead><tr><th>Step</th><th>Status</th><th>Detail</th><th></th></tr></thead>
+              <tbody id="wbSteps"></tbody>
+            </table>
+            <p id="wbExpl" style="font-size:12px;color:var(--muted);margin:8px 0 0"></p>
+          </div>
+          <div>
+            <p class="section-title">Recent apps scanned</p>
+            <ul class="app-list" id="wbApps"></ul>
+            <p class="section-title" style="margin-top:1rem">Tick history</p>
+            <ul class="tick-list" id="wbTicks"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- TOOLS -->
+      <section class="view" id="view-tools">
+        <div class="page-head"><h2>Tools</h2></div>
+        <div class="tool-section">
+          <div class="tool-grid">
+            <div class="tool-item" id="toolAnalyze">
+              <div class="tool-ico"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div>
+              <div><h4>Text check</h4><p>Paste one chat line. Instant hate scan.</p></div>
+            </div>
+            <div class="tool-item" id="toolReplay">
+              <div class="tool-ico"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg></div>
+              <div><h4>Demo assets</h4><p>Run CLI replay on demo PNG/WAV.</p></div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-ico"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+              <div><h4>Security report</h4><p>Threat count and scan stats.</p></div>
+            </div>
+          </div>
+        </div>
+        <div class="tool-section">
+          <div class="tool-grid">
+            <div class="tool-item" id="toolWhitebox">
+              <div class="tool-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+              <div><h4>Process view</h4><p>Foreground app + recent scans.</p></div>
+            </div>
+            <div class="tool-item" id="toolTrace">
+              <div class="tool-ico"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+              <div><h4>Pipeline trace</h4><p>Step-by-step OCR → fusion → decision.</p></div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-ico"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg></div>
+              <div><h4>Export logs</h4><p>SQLite events stay local on device.</p></div>
+            </div>
+          </div>
+        </div>
+        <div id="toolPanel" hidden style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line)">
+          <input id="manualText" type="text" placeholder="Paste chat text…" style="width:100%;max-width:400px;padding:8px;border:1px solid var(--line);border-radius:3px;font:inherit" />
+          <button class="btn btn-teal" type="button" id="btnAnalyze" style="margin-top:8px">Run check</button>
+          <div class="err" id="errTools"></div>
+        </div>
+      </section>
+
+      <!-- SETUP -->
+      <section class="view" id="view-setup">
+        <div class="page-head"><h2>Setup</h2></div>
+        <div class="setup-grid">
+          <div class="setup-row"><label>Child age</label><input id="age" type="number" min="5" max="17" value="10" /></div>
+          <div class="setup-row"><label>Scan interval (seconds)</label><input id="interval" type="number" min="2" max="30" step="0.5" value="2.5" /></div>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-top:1rem">RAM-only capture. Snippets + blurred thumb in DB.</p>
+      </section>
+    </main>
+
+    <footer class="statusbar" id="statusBar"><span id="statusBarText">Idle. <b>Ready.</b></span></footer>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const TITLES = { overview: "Overview", activity: "Log files", whitebox: "Whitebox", tools: "Tools", setup: "Setup" };
+    let _wbTraces = [];
+
+    function applyTheme(t) {
+      document.documentElement.setAttribute("data-theme", t);
+      localStorage.setItem("guardian-theme", t);
+      $("themeLight").classList.toggle("on", t === "light");
+      $("themeDark").classList.toggle("on", t === "dark");
+    }
+    applyTheme(localStorage.getItem("guardian-theme") || "light");
+    $("themeLight").onclick = () => applyTheme("light");
+    $("themeDark").onclick = () => applyTheme("dark");
+
+    document.querySelectorAll(".nav button").forEach((btn) => {
+      btn.onclick = () => {
+        document.querySelectorAll(".nav button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+        $("view-" + btn.dataset.view).classList.add("active");
+        $("pageTitle").textContent = TITLES[btn.dataset.view] || "Overview";
+      };
+    });
+
+    $("toolAnalyze").onclick = () => { $("toolPanel").hidden = false; $("manualText").focus(); };
+    $("toolReplay").onclick = () => alert("CLI: python -m analyst --replay analyst/demo_assets --age 10");
+    $("toolWhitebox").onclick = () => document.querySelector('[data-view="whitebox"]').click();
+    $("toolTrace").onclick = () => document.querySelector('[data-view="whitebox"]').click();
+
+    function stClass(s) {
+      return { ok: "st-ok", skip: "st-skip", fail: "st-fail", warn: "st-warn" }[s] || "st-skip";
+    }
+
+    function renderTrace(trace) {
+      const steps = $("wbSteps");
+      steps.innerHTML = "";
+      if (!trace || !trace.steps) {
+        steps.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">No ticks yet — enable protection.</td></tr>';
+        $("wbExpl").textContent = "";
+        return;
+      }
+      for (const s of trace.steps) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${s.label}</td><td class="${stClass(s.status)}">${s.status}</td><td>${s.detail || "—"}</td><td class="trace-ms">${s.ms ? s.ms + " ms" : ""}</td>`;
+        steps.appendChild(tr);
+      }
+      const out = trace.outcome === "analyzed" ? (trace.decision === "hate" ? "Alert" : "Clear") : trace.outcome;
+      $("wbExpl").textContent = trace.explanation
+        ? `${out} · tick ${trace.tick || "—"} · ${trace.total_ms || 0} ms total — ${trace.explanation}`
+        : `${out} · tick ${trace.tick || "—"}`;
+    }
+
+
+    // Keep the dataflow diagram honest: show the model that is actually loaded
+    // at each step, and light up the path the last tick really took.
+    function renderDiagram(wb) {
+      const m = (wb && wb.modules) || {};
+      const short = (v) => {
+        const t = String(v || "none");
+        if (t === "none" || t === "deferred") return t;
+        return t.length > 26 ? t.slice(0, 25) + "\u2026" : t;
+      };
+      const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+
+      set("dgScreen", short(m.screen));
+      // Keep this short: the box is 168px and running/idle is already
+      // conveyed by the highlight.
+      set("dgAudio", String(m.audio || "none").replace("-loopback", ""));
+      set("dgOcr", short(m.ocr));
+      set("dgAsr", short(m.asr));
+      set("dgText", short(m.text_fast));
+      set("dgFull", short(m.text_full));
+      // Vision meaning: prefer the VLM, fall back to naming the CLIP stub.
+      const vlm = String(m.vision_meaning || "none");
+      set("dgVlm", vlm !== "none" ? short(vlm.replace(/^lmstudio:/, "")) : "off \u00b7 clip " + short(m.clip));
+
+      // Highlight from the last trace. Steps look like
+      // {id, label, status: ok|skip|fail, ms, detail}.
+      const tr = (wb && wb.last_trace) || null;
+      const steps = (tr && tr.steps) || [];
+      const byId = {};
+      for (const st of steps) byId[st.id] = st;
+      const ranOk = (id) => !!(byId[id] && byId[id].status === "ok");
+
+      const mark = (id, on) => {
+        const el = $(id);
+        if (el) el.classList.toggle("on", !!on);
+      };
+      const live = !!(tr && tr.outcome === "analyzed");
+      mark("dgBoxScreen", live && ranOk("capture"));
+      mark("dgBoxAudio", live && ranOk("audio"));
+      mark("dgBoxOcr", live && ranOk("ocr"));
+      mark("dgBoxAsr", live && ranOk("audio"));
+      mark("dgBoxVlm", live && ranOk("vlm"));
+      mark("dgBoxS1", live && ranOk("stage1"));
+      mark("dgBoxS2", live && ranOk("stage2"));
+      mark("dgBoxDecide", live && ranOk("decide"));
+    }
+
+    function renderWhitebox(wb) {
+      const app = wb.current_app || {};
+      $("wbExe").textContent = app.exe || "—";
+      $("wbTitle").textContent = app.title || (wb.capturing ? "No window title" : "Idle");
+      const m = wb.modules || {};
+      const ok = (v, keys) => keys.some((k) => String(v || "").includes(k));
+      $("wbScreen").textContent = m.screen || "—";
+      $("wbOcr").textContent = ok(m.ocr, ["rapid", "tesseract"]) ? "On" : (m.ocr || "—");
+      $("wbAsr").textContent = ok(m.asr, ["whisper", "faster"]) ? "On" : (m.asr || "—");
+      $("wbClip").textContent = ok(m.clip, ["clip"]) ? "On" : (m.clip || "—");
+
+      renderDiagram(wb);
+
+      _wbTraces = wb.traces || [];
+      renderTrace(wb.last_trace);
+
+      const apps = $("wbApps");
+      apps.innerHTML = "";
+      for (const a of wb.recent_apps || []) {
+        const li = document.createElement("li");
+        li.innerHTML = `<code>${a.exe}</code><span>${(a.last_ts || "").slice(11, 19) || "—"}</span>`;
+        apps.appendChild(li);
+      }
+      if (!apps.children.length) {
+        apps.innerHTML = '<li style="color:var(--muted)">—</li>';
+      }
+
+      const ticks = $("wbTicks");
+      ticks.innerHTML = "";
+      for (const t of _wbTraces) {
+        const li = document.createElement("li");
+        const tag = t.outcome === "analyzed" ? (t.decision === "hate" ? "Alert" : "Clear") : t.outcome;
+        li.textContent = `${(t.ts || "").slice(11, 19)} · ${tag} · ${(t.app && t.app.exe) || "?"}`;
+        li.dataset.tick = String(t.tick || "");
+        li.onclick = () => {
+          ticks.querySelectorAll("li").forEach((x) => x.classList.remove("on"));
+          li.classList.add("on");
+          renderTrace(t);
+        };
+        ticks.appendChild(li);
+      }
+    }
+
+    async function api(path, opts) {
+      const r = await fetch(path, opts);
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    }
+
+    function bar(label, val, cls) {
+      const p = Math.round((val || 0) * 100);
+      return `<div class="bar"><i>${label}</i><div class="bar-track"><div class="bar-fill ${cls || ""}" style="width:${p}%"></div></div><em>${(val||0).toFixed(2)}</em></div>`;
+    }
+
+    function setMod(cellId, spanId, name, okKeys) {
+      const n = String(name || "off");
+      const ok = okKeys.some((k) => n.includes(k)) && !/none|deferred|failed/.test(n);
+      $(cellId).className = "mod-cell " + (ok ? "ok" : "warn");
+      $(spanId).textContent = ok ? "On" : n.slice(0, 20);
+    }
+
+    function showRun(run) {
+      if (!run) return;
+      const hate = run.decision === "hate";
+      const st = $("overviewStatus");
+      st.className = "overview-status " + (hate ? "threat" : "ok");
+      $("statusTitle").textContent = hate ? "Security alert" : "You are protected";
+      const expl = (run.notes || []).find((n) => String(n).startsWith("explanation:"));
+      $("statusSub").textContent = expl
+        ? String(expl).replace(/^explanation:/, "").slice(0, 120)
+        : (run.child_safe_summary || (hate ? "Hate signal detected." : "No threat above threshold."));
+      const m = run.modalities || {};
+      $("bars").innerHTML = bar("Text", m.text) + bar("Image", m.image, "img") + bar("Audio", m.audio, "aud");
+      $("ocr").textContent = run.ocr_snippet || "—";
+      $("asr").textContent = run.transcript_snippet || "—";
+      // What the vision branch actually read out of the picture on screen.
+      $("imgCaption").textContent = run.image_caption || "—";
+      $("imgText").textContent = run.image_text || "—";
+      $("hits").textContent = (run.lexicon_hits || []).join(", ") || "—";
+      $("summary").textContent = run.child_safe_summary || "—";
+      if (run.thumb_data_url) { $("thumb").src = run.thumb_data_url; $("thumb").hidden = false; }
+      else $("thumb").hidden = true;
+    }
+
+    function fillTimeline(ul, runs) {
+      ul.innerHTML = "";
+      for (const r of runs || []) {
+        const li = document.createElement("li");
+        const hate = r.decision === "hate";
+        li.innerHTML = `<span class="${hate ? "tl-hate" : "tl-ok"}">${hate ? "Alert" : "Clear"} · ${(r.score??0).toFixed(2)}</span>
+          <div class="tl-meta">${(r.ts||"").slice(11,19)} · ${(r.ocr_snippet||r.transcript_snippet||"").slice(0,60)}</div>`;
+        li.onclick = () => { showRun(r); document.querySelector('[data-view="overview"]').click(); };
+        ul.appendChild(li);
+      }
+    }
+
+    async function refresh() {
+      try {
+        const st = await api("/api/status");
+        const on = !!st.capturing;
+        $("btnStart").disabled = on;
+        $("btnStop").disabled = !on;
+        const b = st.backends || {};
+        setMod("mOcr", "mOcrS", b.ocr, ["rapid", "tesseract"]);
+        setMod("mAsr", "mAsrS", b.asr, ["whisper", "faster"]);
+        // "Image scan" must report the branch that actually looks at pictures.
+        // CLIP is still deferred, so showing b.clip alone reads "deferred"
+        // forever even when the vision model is running.
+        const vmName = String(b.vision_meaning || "none");
+        setMod("mClip", "mClipS",
+               vmName !== "none" ? vmName.replace(/^lmstudio:/, "") : b.clip,
+               ["clip", "lfm", "vl", "lmstudio"]);
+        setMod("mText", "mTextS", b.text_fast, ["lexicon", "hf"]);
+
+        const sb = $("statusBar");
+        const stats = st.stats || {};
+        if (st.protection === "threat") {
+          sb.className = "statusbar threat";
+          $("statusBarText").innerHTML = `Monitoring. <b>Alert (${stats.hate || 0})</b>`;
+        } else if (on) {
+          sb.className = "statusbar";
+          $("statusBarText").innerHTML = `Monitoring. <b>Protected.</b>`;
+        } else {
+          sb.className = "statusbar";
+          $("statusBarText").innerHTML = `Idle. <b>Ready.</b>`;
+        }
+
+        if (!on && st.protection !== "threat") {
+          $("statusTitle").textContent = "You are protected";
+          $("statusSub").textContent = on ? "Live scan active." : "Press Enable to start.";
+        }
+        const err = st.last_error || "";
+        const errEl = $("err");
+        errEl.textContent = err;
+        errEl.className = err.startsWith("screen:") && on ? "warn" : "err";
+
+        const data = await api("/api/runs?limit=50");
+        const s = data.stats || stats;
+        $("statsLine").textContent = `${s.hate || 0} threats · ${s.total || 0} scans`;
+        fillTimeline($("timelineHome"), (data.runs || []).slice(0, 8));
+        fillTimeline($("timeline"), data.runs || []);
+        if (data.runs && data.runs[0]) showRun(data.runs[0]);
+
+        try {
+          const wb = await api("/api/whitebox");
+          renderWhitebox(wb);
+        } catch (_) { /* whitebox optional */ }
+      } catch (e) {
+        $("err").textContent = "Service offline";
+        $("statusBarText").innerHTML = `Error. <b>Check server.</b>`;
+      }
+    }
+
+    $("btnStart").onclick = async () => {
+      await api("/api/capture/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ age: +$("age").value || 10, interval_s: +$("interval").value || 2.5 }),
+      });
+      refresh();
+    };
+    $("btnStop").onclick = async () => { await api("/api/capture/stop", { method: "POST" }); refresh(); };
+    $("btnAnalyze").onclick = async () => {
+      const fd = new FormData();
+      fd.append("age", $("age").value || "10");
+      fd.append("text", $("manualText").value || "");
+      try {
+        const r = await fetch("/api/analyze", { method: "POST", body: fd });
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        if (data.run) { showRun(data.run); document.querySelector('[data-view="overview"]').click(); }
+        refresh();
+      } catch (e) { $("errTools").textContent = String(e.message || e); }
+    };
+
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>

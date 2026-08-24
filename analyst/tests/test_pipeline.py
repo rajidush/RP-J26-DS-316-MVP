@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT))
 from analyst.buffer import TransientMediaBuffer
 from analyst.pipeline import AnalystPipeline
 from analyst.stage1.lexicon import score_text
+from analyst.stage1.text_fast import TextFast
 from analyst.stage2.fusion import fuse
 
 
@@ -20,6 +21,28 @@ class LexiconTests(unittest.TestCase):
 
     def test_gaming_benign(self):
         score, cat, _ = score_text("gg ez noob")
+        self.assertLess(score, 0.40)
+        self.assertEqual(cat, "none")
+
+
+class TextFastTests(unittest.TestCase):
+    def test_injected_pretrained_boosts_score(self):
+        tf = TextFast(pretrained_score_fn=lambda _t: 0.91)
+        score, cat, _ = tf.score("this person is awful")
+        self.assertGreaterEqual(score, 0.91)
+        self.assertEqual(cat, "bullying")
+        self.assertEqual(tf.name, "lexicon+injected")
+
+    def test_lexicon_wins_when_higher_than_model(self):
+        tf = TextFast(pretrained_score_fn=lambda _t: 0.20)
+        score, cat, _ = tf.score("you should kys")
+        self.assertGreater(score, 0.85)
+        self.assertEqual(cat, "threat")
+
+    def test_without_transformers_still_lexicon(self):
+        tf = TextFast()
+        # May be lexicon or lexicon+hf depending on env; scoring must not crash
+        score, cat, _ = tf.score("gg ez")
         self.assertLess(score, 0.40)
         self.assertEqual(cat, "none")
 

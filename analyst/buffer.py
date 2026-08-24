@@ -48,6 +48,7 @@ class TransientMediaBuffer:
             }
 
     def get(self, trigger_id: str) -> dict:
+        """Detached copies. Callers own them; delete() cannot wipe these."""
         with self._lock:
             slot = self._slots.get(trigger_id)
             if slot is None:
@@ -56,6 +57,14 @@ class TransientMediaBuffer:
                 "frame": bytes(slot["frame"]) if slot["frame"] is not None else None,
                 "audio": bytes(slot["audio"]) if slot["audio"] is not None else None,
             }
+
+    def borrow(self, trigger_id: str) -> dict:
+        """Live buffers — the same objects delete() zeroes. Never copy or retain."""
+        with self._lock:
+            slot = self._slots.get(trigger_id)
+            if slot is None:
+                return {"frame": None, "audio": None}
+            return {"frame": slot["frame"], "audio": slot["audio"]}
 
     def delete(self, trigger_id: str) -> bool:
         with self._lock:
@@ -86,6 +95,8 @@ class TransientMediaBuffer:
     ) -> Iterator[dict]:
         self.put(trigger_id, frame=frame, audio=audio)
         try:
-            yield self.get(trigger_id)
+            # borrow(), not get(): the yielded buffers are the ones delete()
+            # zeroes, so the wipe actually covers the bytes the caller read.
+            yield self.borrow(trigger_id)
         finally:
             self.delete(trigger_id)

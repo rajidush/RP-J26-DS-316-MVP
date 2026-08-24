@@ -156,14 +156,16 @@ python -m unittest analyst.tests.test_pipeline -v
 
 ## Build milestones (from Engineering Plan §4.4)
 
+See **[`analyst/BUILD_STEPS.md`](analyst/BUILD_STEPS.md)** for the ordered checklist.
+
 | Milestone | Focus | Done means |
 |---|---|---|
 | **A1** | Extraction + replay CLI | OCR/ASR/CLIP plugs; latency notes in `evaluation/` |
-| **A2** | Stage 1 | Lexicon + `text_fast` ONNX + `image_fast`; θ1 tuned |
+| **A2** | Stage 1 | Lexicon + pretrained/`text_fast` + `image_fast`; θ1 tuned |
 | **A3** | Stage 2 research | Dataset C + `text_full` ablations + fusion (main thesis) |
 | **A4** | Eval + integrate | CPU report; wire `hate.detected` to C3/C4 |
 
-**Now:** A1 foundation is in place (cascade, contracts, CLI, lexicon). Next: optional OCR/ASR install, then A2 ONNX training.
+**Now:** Step 1 — pretrained Stage-1 text + demo assets (lexicon always remains).
 
 ---
 
