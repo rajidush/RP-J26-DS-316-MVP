@@ -904,18 +904,8 @@ export default function SocraticPrototype() {
 
         {/* Navigation Tabs */}
         <div className="flex items-center bg-[#FAF9F6] p-1 rounded-lg border border-[#DDE0D0]" id="header-nav">
-          <button
-            onClick={() => setActiveTab("sandbox")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
-              activeTab === "sandbox" 
-                ? "bg-[#5A5A40] text-white shadow-sm" 
-                : "text-[#6B705C] hover:text-[#2D3025]"
-            }`}
-            id="tab-sandbox-btn"
-          >
-            <Sliders className="w-4 h-4" />
-            Socratic Buddy
-          </button>
+          
+          
           <button
             onClick={() => setActiveTab("videoGuard")}
             className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
@@ -928,18 +918,7 @@ export default function SocraticPrototype() {
             <Shield className="w-4 h-4" />
             Zero-Trust Video Guard
           </button>
-          <button
-            onClick={() => setActiveTab("codeHub")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
-              activeTab === "codeHub" 
-                ? "bg-[#5A5A40] text-white shadow-sm" 
-                : "text-[#6B705C] hover:text-[#2D3025]"
-            }`}
-            id="tab-code-btn"
-          >
-            <Code className="w-4 h-4" />
-            Offline Python Hub
-          </button>
+          
           <button
             onClick={() => setActiveTab("analyst")}
             className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
@@ -951,6 +930,18 @@ export default function SocraticPrototype() {
           >
             <Activity className="w-4 h-4" />
             Hate Analyst
+          </button>
+          <button
+            onClick={() => setActiveTab("sandbox")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
+              activeTab === "sandbox" 
+                ? "bg-[#5A5A40] text-white shadow-sm" 
+                : "text-[#6B705C] hover:text-[#2D3025]"
+            }`}
+            id="tab-sandbox-btn"
+          >
+            <Sliders className="w-4 h-4" />
+            Socratic Buddy
           </button>
           <Link
             href="/parent"
