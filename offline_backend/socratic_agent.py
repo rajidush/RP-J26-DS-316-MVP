@@ -55,21 +55,101 @@ class SocraticAgentManager:
 
     def _get_system_prompt(self, child_age: int, threat_type: str, current_phase: str) -> str:
         """
-        Implements the Socratic Buddy safety guide system prompt.
+        Builds a fully phase-aware, age-differentiated system prompt.
+
+        The 3-Step Socratic State Machine:
+          - Acknowledge: Empathise and gently open dialogue without revealing raw harmful content.
+          - Reason:      Probe critical thinking — why is this content problematic?
+          - Contract:    Negotiate a concrete, child-led safety commitment.
+
+        Age Routing:
+          - Age <= 10 (Protective):             Simple vocabulary, reassuring tone, one easy safe question.
+          - Age >= 11 (Autonomy & Negotiation): Peer-level framing, respectful critical inquiry.
         """
-        system_prompt = (
-            f"You are an educational safety guide. A video containing {threat_type.replace('_', ' ')} was blocked. "
-            "Do not lecture. Ask one open-ended question to help the user critically reflect on this content.\n\n"
-            "OUTPUT COMPLIANCE:\n"
-            "You MUST output raw JSON matching this schema:\n"
+        threat_label = threat_type.replace("_", " ")
+        protective_mode = child_age <= 10
+
+        # --- Phase-specific instruction blocks ---
+        if current_phase == "Acknowledge":
+            if protective_mode:
+                phase_instruction = (
+                    f"A safety system just covered the screen because it detected {threat_label}. "
+                    "Your job in this turn is ONLY to: (1) Gently reassure the child that they are safe, "
+                    "(2) Acknowledge that something was on the screen without describing or repeating it, "
+                    "(3) Ask ONE simple, warm, open-ended question to understand how they feel right now. "
+                    "Do NOT ask why they were watching it. Do NOT lecture. Keep vocabulary elementary and kind."
+                )
+            else:
+                phase_instruction = (
+                    f"A safety system intercepted the screen because it detected {threat_label}. "
+                    "Your job in this turn is ONLY to: (1) Briefly acknowledge the interception without judgment, "
+                    "(2) Signal that you respect their space while explaining that this content poses real risks, "
+                    "(3) Ask ONE open-ended question to let them share their perspective on what happened. "
+                    "Do NOT repeat or describe the harmful content. Do NOT moralize. Speak as a thoughtful peer."
+                )
+
+        elif current_phase == "Reason":
+            if protective_mode:
+                phase_instruction = (
+                    "The child has acknowledged what happened. Your job in this turn is ONLY to: "
+                    "(1) Validate any emotion they expressed, "
+                    "(2) Ask ONE simple question that helps them think about WHY some content can feel scary or be harmful. "
+                    "Use simple analogies (e.g., 'like how some foods are not good for us'). "
+                    "Do NOT answer the question for them. Do NOT lecture. One question only."
+                )
+            else:
+                phase_instruction = (
+                    "The child has acknowledged the interception. Your job in this turn is ONLY to: "
+                    "(1) Acknowledge their response with genuine respect, "
+                    "(2) Ask ONE probing, critical-thinking question that encourages them to reason about "
+                    f"why {threat_label} content can be harmful — to themselves or to others. "
+                    "Invite reflection, not recitation of rules. Challenge them intellectually as a peer. "
+                    "One question only. No lecturing."
+                )
+
+        elif current_phase == "Contract":
+            if protective_mode:
+                phase_instruction = (
+                    "The child has engaged in reasoning. Your job in this turn is ONLY to: "
+                    "(1) Warmly praise their thoughtfulness, "
+                    "(2) Propose a clear, friendly safety agreement — asking them to close or move away from the content now. "
+                    "Frame it as a team decision ('Can we close this together?'). "
+                    "Set agreed_to_boundary=true ONLY if the child's last message contains explicit verbal agreement "
+                    "(e.g., 'ok', 'yes', 'sure', 'deal', 'I agree', 'let's do it'). "
+                    "If they have not agreed yet, set agreed_to_boundary=false and gently re-invite agreement."
+                )
+            else:
+                phase_instruction = (
+                    "The child has reflected on the reasoning. Your job in this turn is ONLY to: "
+                    "(1) Acknowledge their reasoning maturely, "
+                    "(2) Propose a concrete, negotiated safety boundary — invite them to commit to closing or "
+                    "stepping away from this content category. "
+                    "Frame it as a mutual agreement between equals, not a command. "
+                    "Set agreed_to_boundary=true ONLY if the child's last message contains an explicit, "
+                    "clear verbal commitment (e.g., 'agree', 'yes', 'I'll close it', 'deal', 'fine', 'ok'). "
+                    "If they have not clearly agreed, set agreed_to_boundary=false and invite once more."
+                )
+        else:
+            # Defensive catch-all — should never reach here in a correctly-running session
+            phase_instruction = (
+                f"You are a safety guide. {threat_label} content was detected. "
+                "Speak calmly to the child and guide them toward closing this content safely."
+            )
+
+        # --- JSON output schema instruction (always appended) ---
+        schema_instruction = (
+            "\n\nOUTPUT COMPLIANCE — CRITICAL:\n"
+            "You MUST output ONLY raw JSON. No preamble, no commentary, no markdown, no code blocks.\n"
+            "Match this exact schema:\n"
             "{\n"
-            '  "socratic_response_to_child": "string (the single open-ended question spoken to the child)",\n'
-            '  "child_emotion": "string (one-word categorization of child\'s emotional state)",\n'
-            '  "agreed_to_boundary": true/false (set to true if they agree to close/pivot, default false)\n'
+            '  "socratic_response_to_child": "<your single spoken response to the child>",\n'
+            '  "child_emotion": "<one-word inferred emotion: curious|defensive|scared|compliant|frustrated|neutral|reflective>",\n'
+            '  "agreed_to_boundary": <true only if child explicitly agreed, false otherwise>\n'
             "}\n"
-            "Do NOT include any preamble, commentary, markdown wrapping, or code blocks. Output ONLY valid JSON."
+            "Output ONLY the JSON object. Nothing before or after it."
         )
-        return system_prompt
+
+        return phase_instruction + schema_instruction
 
     def _format_messages_for_llm(self, system_prompt: str, history: List[Dict], threat_type: str, max_turns: int = 4) -> List[Dict]:
         """
@@ -112,24 +192,38 @@ class SocraticAgentManager:
 
     def execute_turn(self, session_id: str, child_response: str) -> Tuple[dict, dict]:
         """
-        Executes a deterministic state machine turn.
-        Updates state transitions, trims memory, calls the local SLM, and handles schema output.
+        Main inference loop — executes one deterministic state-machine turn.
+
+        State Machine Contract:
+          Acknowledge (turn 1) -> Reason (turn 2) -> Contract (turn 3+, loops until agreed_to_boundary=True)
+
+        Steps:
+          1.  Append child's response to rolling history.
+          2.  Generate the phase-aware, age-differentiated system prompt.
+          3.  Format messages with strict Jinja role alternation (user/assistant).
+          4.  Call local SLM with 3-tier fallback (json_object -> plain -> merged system).
+          5.  Parse and validate structured JSON output.
+          6.  Apply deterministic phase transitions:
+                Acknowledge -> Reason  (always, after one turn)
+                Reason      -> Contract (always, after one turn)
+                Contract    -> completed=True  (only when agreed_to_boundary=True)
+          7.  Append assistant response to history and return result payload.
         """
         session = self.get_session(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found.")
 
-        # 1. Update/Append Child Response to History
+        # --- Step 1: Append child's message to history ---
         session["history"].append({"role": "user", "content": child_response})
 
-        # 2. Dynamic System Prompt Generation based on Age, Threat, and active State Phase
+        # --- Step 2: Phase-aware, age-differentiated system prompt ---
         system_prompt = self._get_system_prompt(
             child_age=session["child_age"],
             threat_type=session["threat_type"],
             current_phase=session["current_phase"]
         )
 
-        # 3. Format message history for strict Jinja template compatibility (Gemma 3)
+        # --- Step 3: Format messages for Jinja-compatible LLM ---
         messages = self._format_messages_for_llm(
             system_prompt=system_prompt,
             history=session["history"],
@@ -137,11 +231,11 @@ class SocraticAgentManager:
             max_turns=4
         )
 
-        # 4. Call Local SLM with multi-tier fallback for local engine resilience
+        # --- Step 4: Call local SLM with 3-tier fallback ---
         raw_content = ""
         try:
             try:
-                # Primary attempt: low temperature with JSON schema constraint
+                # Tier 1: Primary — json_object constraint + low temperature
                 response = self.client.chat.completions.create(
                     model=self.model_name,
                     messages=messages,
@@ -150,14 +244,14 @@ class SocraticAgentManager:
                 )
             except Exception:
                 try:
-                    # Retry Tier 1: without response_format if grammar sampling is unsupported
+                    # Tier 2: Retry without response_format (for models lacking grammar sampling)
                     response = self.client.chat.completions.create(
                         model=self.model_name,
                         messages=messages,
                         temperature=0.2
                     )
                 except Exception:
-                    # Retry Tier 2: merge system prompt into first user turn for models rejecting system role
+                    # Tier 3: Merge system prompt into first user turn (for models rejecting system role)
                     merged_messages = []
                     sys_text = system_prompt
                     for msg in messages:
@@ -179,52 +273,77 @@ class SocraticAgentManager:
                     )
 
             raw_content = response.choices[0].message.content.strip()
+
         except Exception as e:
-            # Fallback for offline resilience if LM Studio connection completely fails
+            # Offline fallback: deterministic rule-based scaffolding (no LLM dependency)
             raw_content = self._get_fallback_response(session, child_response, str(e))
 
-        # 5. Safe Parse JSON Structure
+        # --- Step 5: Parse and validate JSON output ---
         socratic_text = ""
         child_emotion = "reflective"
         agreed = False
 
         try:
             clean_json = raw_content.strip()
+
+            # Strip markdown code fences if the LLM wrapped output
             if "```json" in clean_json:
                 clean_json = clean_json.split("```json")[1].split("```")[0].strip()
             elif "```" in clean_json:
                 clean_json = clean_json.split("```")[1].split("```")[0].strip()
 
+            # Extract the JSON object if preamble text leaked through
             if "{" in clean_json and "}" in clean_json:
                 first_brace = clean_json.find("{")
                 last_brace = clean_json.rfind("}")
                 clean_json = clean_json[first_brace:last_brace + 1]
 
             parsed_output = json.loads(clean_json)
-            socratic_text = parsed_output.get("socratic_response_to_child", "")
-            child_emotion = parsed_output.get("child_emotion", "reflective")
-            agreed = bool(parsed_output.get("agreed_to_boundary", False))
-        except Exception:
-            socratic_text = raw_content
-            child_emotion = "reflective"
-            agreed = any(w in child_response.lower() for w in ["agree", "ok", "yes", "deal", "sure", "close"])
+            socratic_text = parsed_output.get("socratic_response_to_child", "").strip()
+            child_emotion = parsed_output.get("child_emotion", "reflective").strip()
 
+            # agreed_to_boundary is only meaningful and trusted in the Contract phase.
+            # In earlier phases, we force it to False regardless of LLM output to prevent
+            # premature session termination.
+            raw_agreed = bool(parsed_output.get("agreed_to_boundary", False))
+            agreed = raw_agreed if session["current_phase"] == "Contract" else False
+
+        except Exception:
+            # JSON parse failure: use raw content as spoken text and apply keyword heuristic
+            # for agreement — but only in the Contract phase.
+            socratic_text = raw_content.strip()
+            child_emotion = "reflective"
+            if session["current_phase"] == "Contract":
+                agreed = any(
+                    w in child_response.lower()
+                    for w in ["agree", "ok", "yes", "deal", "sure", "close", "i'll", "let's", "fine"]
+                )
+            else:
+                agreed = False
+
+        # Ensure we always have a spoken response
         if not socratic_text:
             socratic_text = raw_content or "Let's talk through what happened on your screen."
 
-        # 6. Update Socratic State Machine Phase Progression (Deterministic Transition)
+        # --- Step 6: Deterministic phase transition (state machine) ---
         previous_phase = session["current_phase"]
-        if session["current_phase"] == "Acknowledge":
-            # Transition to 'Reason' after child acknowledges
-            session["current_phase"] = "Reason"
-        elif session["current_phase"] == "Reason":
-            # Transition to 'Contract' once the child has engaged in reasoning
-            session["current_phase"] = "Contract"
-        elif session["current_phase"] == "Contract" and agreed:
-            # Terminate and mark completed if contract is sealed
-            session["completed"] = True
 
-        # Append assistant's response to the real session history
+        if session["current_phase"] == "Acknowledge":
+            # One turn in Acknowledge -> always advance to Reason
+            session["current_phase"] = "Reason"
+
+        elif session["current_phase"] == "Reason":
+            # One turn in Reason -> always advance to Contract
+            session["current_phase"] = "Contract"
+
+        elif session["current_phase"] == "Contract":
+            # Stay in Contract until the child explicitly agrees; mark complete on agreement
+            if agreed:
+                session["completed"] = True
+            # current_phase stays "Contract" whether agreed or not —
+            # the loop re-runs with the same Contract prompt until boundary is sealed.
+
+        # --- Step 7: Append assistant response to rolling history ---
         assistant_json_str = json.dumps({
             "socratic_response_to_child": socratic_text,
             "child_emotion": child_emotion,
@@ -249,30 +368,71 @@ class SocraticAgentManager:
 
     def _get_fallback_response(self, session: dict, child_response: str, error_msg: str) -> str:
         """
-        Local fallback model in case of API failure (offline resilience).
+        Deterministic offline fallback — runs when the local SLM server is unreachable.
+
+        Mirrors the 3-phase Socratic scaffolding with age-differentiated language so the
+        pedagogical flow remains intact even without the LLM. The fallback checks for
+        explicit agreement keywords only in the Contract phase.
         """
         age = session["child_age"]
         phase = session["current_phase"]
-        threat = session["threat_type"]
-        
-        # Simple heuristics for offline safety fallback
-        if age <= 10:
+        threat = session["threat_type"].replace("_", " ")
+        protective_mode = age <= 10
+
+        # Explicit agreement detection — gated to Contract phase only
+        child_agreed = False
+        if phase == "Contract":
+            child_agreed = any(
+                w in child_response.lower()
+                for w in ["agree", "ok", "yes", "deal", "sure", "close", "i'll", "let's", "fine"]
+            )
+
+        # Phase + age matrix of fallback responses
+        if protective_mode:
             if phase == "Acknowledge":
-                response = "I noticed something a bit scary here on your screen. I want to help you stay safe. Let's close this together, okay?"
+                response = (
+                    "Hey, I just covered the screen to keep you safe — something a bit scary showed up. "
+                    "You're totally safe right now! How are you feeling?"
+                )
             elif phase == "Reason":
-                response = "Some pictures or words can make us feel confused or scared inside. Why do you think it's a good idea to play with something else right now?"
-            else:
-                response = "Thank you for being so helpful! Let's click home and find a fun safe game to play now, deal?"
+                response = (
+                    "Some things we see on screens can feel confusing or scary inside, a bit like eating "
+                    "something that doesn't agree with your tummy. Why do you think it might be a good idea "
+                    "to stay away from things like that?"
+                )
+            else:  # Contract
+                if child_agreed:
+                    response = "You're so thoughtful! Let's close this together and find something fun and safe instead, deal?"
+                else:
+                    response = "You're doing really well talking about this! Can we make a little promise together to close this and pick something safer? What do you think?"
         else:
             if phase == "Acknowledge":
-                response = f"I've stepped in because a content threat was detected ({threat}). I want to respect your space, but this content carries risks. How do you feel about this interruption?"
+                response = (
+                    f"I've stepped in because the system flagged {threat} content. "
+                    "I'm not here to judge you — I just want to check in. "
+                    "How are you feeling about this interruption?"
+                )
             elif phase == "Reason":
-                response = f"We encounter a lot of intense material online. In your view, why is accessing this specific type of ({threat}) media problematic or unsafe?"
-            else:
-                response = "I appreciate you talking this through with me. Let's agree to close this app and pivot to a safer space. Can we lock that in?"
+                response = (
+                    f"Thanks for sharing that. A lot of people come across {threat} material online. "
+                    "In your own view, why do you think this type of content might be harmful — "
+                    "to you or to the people involved in it?"
+                )
+            else:  # Contract
+                if child_agreed:
+                    response = (
+                        "I really respect how you've thought this through. "
+                        "Let's lock in our agreement — you'll close this and step away from this content. Deal?"
+                    )
+                else:
+                    response = (
+                        "I appreciate you engaging with me on this. "
+                        "Can we agree, as equals, to close this content and move on? "
+                        "Your call — what do you think?"
+                    )
 
         return json.dumps({
             "socratic_response_to_child": response,
             "child_emotion": "reflective",
-            "agreed_to_boundary": "agree" in child_response.lower() or "ok" in child_response.lower() or "yes" in child_response.lower()
+            "agreed_to_boundary": child_agreed
         })
