@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { BACKEND_URL } from "./lib/backend";
+import { BACKEND_URL, ANALYST_URL } from "./lib/backend";
 import { 
   Shield, 
   Terminal, 
@@ -27,7 +27,9 @@ import {
   Compass,
   ArrowRight,
   Activity,
-  Clock
+  Clock,
+  Monitor,
+  ExternalLink
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -339,12 +341,31 @@ interface ChatMessage {
 
 export default function SocraticPrototype() {
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<"sandbox" | "codeHub" | "videoGuard">("sandbox");
+  const [activeTab, setActiveTab] = useState<"sandbox" | "codeHub" | "videoGuard" | "analyst">("sandbox");
 
   // Zero-Trust Guard States
   const [guardState, setGuardState] = useState<any>(null);
   const [guardSimMode, setGuardSimMode] = useState<boolean>(true);
   const [guardActive, setGuardActive] = useState<boolean>(true);
+
+  // C2 Analyst live readings (hate speech)
+  const [analystLive, setAnalystLive] = useState<{
+    online: boolean;
+    capturing: boolean;
+    hate_speech_score: number;
+    latest_run: any | null;
+    stats: { total?: number; hate?: number };
+    panel_url: string;
+  }>({
+    online: false,
+    capturing: false,
+    hate_speech_score: 0,
+    latest_run: null,
+    stats: {},
+    panel_url: ANALYST_URL,
+  });
+  const [hateSpeechScore, setHateSpeechScore] = useState<number>(0.1);
+  const lastAnalystHateIdRef = useRef<string>("");
 
   // Custom Video Upload & Analysis States
   const [videoUrl, setVideoUrl] = useState<string>("");
@@ -382,6 +403,89 @@ export default function SocraticPrototype() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory, loadingTurn]);
 
+  // Poll C2 Analyst readings via C4 bridge (never crashes UI if offline)
+  useEffect(() => {
+    let active = true;
+    const pollAnalyst = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/analyst/status`);
+        if (!res.ok) throw new Error("analyst status unavailable");
+        const data = await res.json();
+        if (!active) return;
+        const st = data.analyst_status || {};
+        const score = Number(data.hate_speech_score || 0);
+        setAnalystLive({
+          online: !!st.online,
+          capturing: !!st.capturing,
+          hate_speech_score: score,
+          latest_run: data.latest_run || null,
+          stats: data.analyst_stats || {},
+          panel_url: data.panel_url || ANALYST_URL,
+        });
+        if (score > 0) {
+          setHateSpeechScore(score);
+        }
+      } catch {
+        if (!active) return;
+        setAnalystLive((prev) => ({ ...prev, online: false, capturing: false }));
+      }
+    };
+    pollAnalyst();
+    const interval = setInterval(pollAnalyst, 3000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Auto-open Socratic when live C2 Analyst reports a new hate alert
+  useEffect(() => {
+    const run = analystLive.latest_run;
+    if (!run || run.decision !== "hate") return;
+    if (interceptActive || isCompleted) return;
+    const runId = String(run.id || "");
+    if (!runId || runId === lastAnalystHateIdRef.current) return;
+    const score = Number(run.risk_score || analystLive.hate_speech_score || 0);
+    if (score <= 0.80) return;
+
+    lastAnalystHateIdRef.current = runId;
+    setHateSpeechScore(score);
+    setLastInterceptionStatus(`ALERT: Analyst hate speech (score ${score.toFixed(2)}) — opening Socratic…`);
+
+    (async () => {
+      try {
+        const triggerRes = await fetch(`${BACKEND_URL}/api/perception/trigger`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nsfw_score: 0.1,
+            violence_score: 0.1,
+            weapons_score: 0.1,
+            hate_speech_score: score,
+            child_age: childAge,
+          }),
+        });
+        if (!triggerRes.ok) return;
+        const triggerData = await triggerRes.json();
+        if (!triggerData.threat_detected) return;
+        setActiveThreatType(triggerData.threat_type);
+        setSessionId(triggerData.session_id);
+        setCurrentPhase("Acknowledge");
+        setChildEmotion("neutral");
+        setAgreedToBoundary(false);
+        setIsCompleted(false);
+        setChatHistory([
+          { role: "assistant", content: JSON.stringify({ socratic_response_to_child: triggerData.initial_response, child_emotion: "neutral", agreed_to_boundary: false }) }
+        ]);
+        setInterceptActive(true);
+        setActiveTab("sandbox");
+        setLastInterceptionStatus(`ALERT: Analyst → Socratic (${triggerData.threat_type})`);
+      } catch {
+        // keep UI stable if backend briefly unavailable
+      }
+    })();
+  }, [analystLive.latest_run, analystLive.hate_speech_score, interceptActive, isCompleted, childAge]);
+
   // Background Polling of Zero-Trust Guard state
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -415,6 +519,7 @@ export default function SocraticPrototype() {
               nsfw_score: data.nsfw_score || 0.1,
               violence_score: data.violence_score || 0.1,
               weapons_score: data.weapons_score || 0.1,
+              hate_speech_score: hateSpeechScore || 0.0,
               child_age: childAge,
             };
             
@@ -448,7 +553,7 @@ export default function SocraticPrototype() {
     
     interval = setInterval(pollGuardState, 2000);
     return () => clearInterval(interval);
-  }, [guardSimMode, interceptActive, isCompleted, childAge]);
+  }, [guardSimMode, interceptActive, isCompleted, childAge, hateSpeechScore]);
 
   const toggleSimulationMode = async (simMode: boolean) => {
     try {
@@ -535,6 +640,7 @@ export default function SocraticPrototype() {
               nsfw_score: data.nsfw_score || 0.1,
               violence_score: data.violence_score || 0.1,
               weapons_score: data.weapons_score || 0.1,
+              hate_speech_score: hateSpeechScore || 0.0,
               child_age: childAge,
             };
             
@@ -657,6 +763,7 @@ export default function SocraticPrototype() {
       nsfw_score: adultScore,
       violence_score: violenceScore,
       weapons_score: weaponsScore,
+      hate_speech_score: hateSpeechScore,
       child_age: childAge,
     };
 
@@ -750,23 +857,32 @@ export default function SocraticPrototype() {
   };
 
   // Quick Preset Triggers for Testing
-  const applyPreset = (type: "violence" | "weapons" | "adult" | "clean") => {
+  const applyPreset = (type: "violence" | "weapons" | "adult" | "hate" | "clean") => {
     if (type === "violence") {
       setViolenceScore(0.95);
       setWeaponsScore(0.15);
       setAdultScore(0.05);
+      setHateSpeechScore(0.1);
     } else if (type === "weapons") {
       setViolenceScore(0.05);
       setWeaponsScore(0.92);
       setAdultScore(0.12);
+      setHateSpeechScore(0.1);
     } else if (type === "adult") {
       setViolenceScore(0.02);
       setWeaponsScore(0.08);
       setAdultScore(0.98);
+      setHateSpeechScore(0.1);
+    } else if (type === "hate") {
+      setViolenceScore(0.05);
+      setWeaponsScore(0.05);
+      setAdultScore(0.05);
+      setHateSpeechScore(0.92);
     } else {
       setViolenceScore(0.12);
       setWeaponsScore(0.22);
       setAdultScore(0.15);
+      setHateSpeechScore(0.1);
     }
   };
 
@@ -812,7 +928,30 @@ export default function SocraticPrototype() {
             <Shield className="w-4 h-4" />
             Zero-Trust Video Guard
           </button>
-          
+          <button
+            onClick={() => setActiveTab("codeHub")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
+              activeTab === "codeHub" 
+                ? "bg-[#5A5A40] text-white shadow-sm" 
+                : "text-[#6B705C] hover:text-[#2D3025]"
+            }`}
+            id="tab-code-btn"
+          >
+            <Code className="w-4 h-4" />
+            Offline Python Hub
+          </button>
+          <button
+            onClick={() => setActiveTab("analyst")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
+              activeTab === "analyst" 
+                ? "bg-[#5A5A40] text-white shadow-sm" 
+                : "text-[#6B705C] hover:text-[#2D3025]"
+            }`}
+            id="tab-analyst-btn"
+          >
+            <Activity className="w-4 h-4" />
+            Hate Analyst
+          </button>
           <Link
             href="/parent"
             className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition text-[#6B705C] hover:text-[#2D3025]"
@@ -849,6 +988,10 @@ export default function SocraticPrototype() {
                   <Terminal className="w-4 h-4 mt-0.5 shrink-0 text-[#5A5A40]" />
                   <div className="leading-relaxed">
                     Connected to <strong className="text-[#2D3025]">Local Python Backend</strong> (<code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">{BACKEND_URL}</code>) &amp; <strong className="text-[#2D3025]">LM Studio</strong> (<code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">http://localhost:1234</code>).
+                    {" "}Analyst C2: <code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">{analystLive.panel_url || ANALYST_URL}</code>
+                    <span className={`ml-1 ${analystLive.online ? "text-emerald-700" : "text-amber-700"}`}>
+                      ({analystLive.online ? "online" : "offline"})
+                    </span>
                   </div>
                 </div>
               </div> */}
@@ -893,6 +1036,13 @@ export default function SocraticPrototype() {
                     id="preset-adult-btn"
                   >
                     🔞 Adult Material
+                  </button>
+                  <button 
+                    onClick={() => applyPreset("hate")}
+                    className="text-xs px-2.5 py-1 rounded bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 transition"
+                    id="preset-hate-btn"
+                  >
+                    💬 Hate Speech (C2)
                   </button>
                 </div>
 
@@ -976,6 +1126,33 @@ export default function SocraticPrototype() {
                       onChange={(e) => setAdultScore(parseFloat(e.target.value))}
                       className="w-full accent-[#5A5A40] bg-[#FAF9F6] border border-[#DDE0D0] h-2 rounded-lg appearance-none cursor-pointer"
                       id="input-adult"
+                    />
+                  </div>
+
+                  {/* Hate Speech — live from C2 Analyst when available */}
+                  <div className="flex flex-col gap-1.5" id="slider-hate-container">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-[#2D3025] font-medium flex items-center gap-1">
+                        Hate Speech Score
+                        {analystLive.online && (
+                          <span className="text-[9px] uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded">
+                            Live C2
+                          </span>
+                        )}
+                      </span>
+                      <span className={`font-bold ${hateSpeechScore > 0.80 ? "text-rose-600" : "text-[#6B705C]"}`}>
+                        {hateSpeechScore.toFixed(2)}
+                      </span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0.0" 
+                      max="1.0" 
+                      step="0.05"
+                      value={hateSpeechScore} 
+                      onChange={(e) => setHateSpeechScore(parseFloat(e.target.value))}
+                      className="w-full accent-[#5A5A40] bg-[#FAF9F6] border border-[#DDE0D0] h-2 rounded-lg appearance-none cursor-pointer"
+                      id="input-hate"
                     />
                   </div>
                 </div>
@@ -1477,6 +1654,109 @@ export default function SocraticPrototype() {
               </div>
             </section>
           </>
+        )}
+
+        {/* C2 Hate Analyst — live readings + panel entry */}
+        {activeTab === "analyst" && (
+          <section className="col-span-12 flex flex-col gap-6" id="analyst-hub-section">
+            <div className="bg-white border border-[#DDE0D0] rounded-xl p-6 shadow-sm">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#DDE0D0] pb-4 mb-5">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#2D3025] flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-[#5A5A40]" />
+                    C2 Hate-Speech Analyst
+                  </h2>
+                  <p className="text-xs text-[#6B705C] mt-1">
+                    On-device OCR / ASR / CLIP cascade. Readings feed Parent Dashboard and Socratic intercept.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${
+                    analystLive.online
+                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                      : "bg-amber-50 text-amber-800 border-amber-200"
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${analystLive.online ? "bg-emerald-500" : "bg-amber-500"}`} />
+                    {analystLive.online ? (analystLive.capturing ? "Monitoring" : "Online · Idle") : "Panel Offline"}
+                  </span>
+                  <a
+                    href={analystLive.panel_url || ANALYST_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#5A5A40] text-white text-xs font-medium hover:bg-[#454530] transition"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Open Full Panel
+                  </a>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="rounded-lg border border-[#DDE0D0] bg-[#FAF9F6] p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-[#6B705C] font-semibold">Hate Score</p>
+                  <p className={`text-2xl font-bold mt-1 ${hateSpeechScore > 0.8 ? "text-rose-600" : "text-[#2D3025]"}`}>
+                    {hateSpeechScore.toFixed(2)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-[#DDE0D0] bg-[#FAF9F6] p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-[#6B705C] font-semibold">Total Scans</p>
+                  <p className="text-2xl font-bold mt-1 text-[#2D3025]">{analystLive.stats.total ?? "—"}</p>
+                </div>
+                <div className="rounded-lg border border-[#DDE0D0] bg-[#FAF9F6] p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-[#6B705C] font-semibold">Hate Alerts</p>
+                  <p className="text-2xl font-bold mt-1 text-rose-600">{analystLive.stats.hate ?? "—"}</p>
+                </div>
+                <div className="rounded-lg border border-[#DDE0D0] bg-[#FAF9F6] p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-[#6B705C] font-semibold">Last Decision</p>
+                  <p className="text-lg font-bold mt-1 text-[#2D3025] capitalize">
+                    {analystLive.latest_run?.decision?.replace("-", " ") || "—"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="rounded-lg border border-[#DDE0D0] p-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B705C] mb-3">Latest Reading</h3>
+                  {analystLive.latest_run ? (
+                    <div className="flex flex-col gap-2 text-sm">
+                      <p><span className="text-[#6B705C]">App:</span> <code className="text-xs bg-[#F1F2EB] px-1 rounded">{analystLive.latest_run.app_exe || analystLive.latest_run.session_hint || "—"}</code></p>
+                      <p><span className="text-[#6B705C]">Category:</span> {String(analystLive.latest_run.category || "none").replace("_", " ")}</p>
+                      <p><span className="text-[#6B705C]">Risk:</span> {Number(analystLive.latest_run.risk_score || 0).toFixed(2)}</p>
+                      <p className="text-xs text-[#6B705C] mt-1">OCR / speech snippets stay redacted on device.</p>
+                      <pre className="text-xs bg-[#FAF9F6] border border-[#DDE0D0] rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap">
+                        {(analystLive.latest_run.ocr_text || analystLive.latest_run.transcript || "—").slice(0, 200)}
+                      </pre>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[#6B705C]">No scans yet. Enable protection in the Analyst panel.</p>
+                  )}
+                </div>
+                <div className="rounded-lg border border-[#DDE0D0] p-4 flex flex-col gap-3">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#6B705C]">Connected Parts</h3>
+                  <ul className="text-sm text-[#2D3025] flex flex-col gap-2">
+                    <li className="flex items-start gap-2"><CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" /> Parent Dashboard alerts &amp; hate counts</li>
+                    <li className="flex items-start gap-2"><CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" /> Sandbox hate score + Socratic auto-intercept</li>
+                    <li className="flex items-start gap-2"><CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" /> Perception trigger uses live C2 score when &gt; 0.80</li>
+                  </ul>
+                  <div className="flex flex-wrap gap-2 mt-auto pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("sandbox")}
+                      className="px-3 py-2 text-xs font-medium rounded-lg border border-[#DDE0D0] bg-[#FAF9F6] hover:bg-white transition"
+                    >
+                      Go to Sandbox
+                    </button>
+                    <Link
+                      href="/parent"
+                      className="px-3 py-2 text-xs font-medium rounded-lg border border-[#DDE0D0] bg-[#FAF9F6] hover:bg-white transition inline-flex items-center gap-1"
+                    >
+                      <Monitor className="w-3.5 h-3.5" /> Parent Dashboard
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         )}
 
         {/* Offline Code Hub View */}

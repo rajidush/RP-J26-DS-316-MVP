@@ -26,7 +26,7 @@ import {
   Check
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { BACKEND_URL } from "../lib/backend";
+import { BACKEND_URL, ANALYST_URL } from "../lib/backend";
 
 interface ChildPersona {
   id: string;
@@ -90,6 +90,9 @@ export default function ParentDashboard() {
     high_severity_alerts?: number;
     hate_speech_detected?: number;
     screen_time_minutes?: number;
+    analyst_status?: { online?: boolean; capturing?: boolean; panel_url?: string };
+    analyst_panel_url?: string;
+    analyst_stats?: { total?: number; hate?: number };
   } | null>(null);
   const [backendAvailable, setBackendAvailable] = useState<boolean>(false);
 
@@ -411,14 +414,17 @@ export default function ParentDashboard() {
       const runs = (backendData.analyst_runs || [])
         .filter(r => r.child_age === activePersona.age && r.decision === "hate");
       runs.forEach(run => {
-        const sourceName = run.source.ocr ? "OCR Search" : run.source.overlay ? "Overlay Text" : run.source.asr ? "Audio Transcript" : "Vision Screen Grab";
+        const src = run.source || {};
+        const sourceName = src.ocr ? "OCR Search" : src.overlay ? "Overlay Text" : src.asr ? "Audio Transcript" : "Vision Screen Grab";
+        const cat = String(run.category || "none").replace(/_/g, " ");
+        const risk = Number(run.risk_score ?? 0);
         list.push({
           id: run.id,
           timestamp: new Date(run.timestamp),
           timeStr: run.time_str,
-          title: `Hate Speech Detected (${run.category.replace('_', ' ')})`,
-          app: `Analyst: ${sourceName}`,
-          severity: run.risk_score > 0.9 ? "High" : "Medium",
+          title: `Hate Speech Detected (${cat})`,
+          app: `Analyst: ${sourceName}${run.app_exe ? ` · ${run.app_exe}` : ""}`,
+          severity: risk > 0.9 ? "High" : "Medium",
           severityColor: "bg-rose-50 text-rose-700 border border-rose-100",
           iconBg: "bg-rose-50 text-rose-600"
         });
@@ -455,11 +461,12 @@ export default function ParentDashboard() {
       runs.forEach(run => {
         const textCtx = run.overlay_text || run.ocr_text || run.transcript;
         const truncatedText = textCtx ? (textCtx.length > 80 ? textCtx.slice(0, 80) + "..." : textCtx) : "N/A";
+        const risk = Number(run.risk_score ?? 0);
         list.push({
           id: run.id,
           timestamp: new Date(run.timestamp),
           title: "Hate Speech Flagged",
-          details: `Analyst detected category "${run.category}" (risk score ${run.risk_score.toFixed(2)}). Content flagged: "${truncatedText}"`,
+          details: `Analyst detected category "${String(run.category || "none")}" (risk score ${risk.toFixed(2)}). Content flagged: "${truncatedText}"`,
           impact: "Negative",
           impactColor: "bg-rose-50 text-rose-800 border border-rose-100",
           iconBg: "bg-rose-50 text-rose-600"
@@ -585,6 +592,16 @@ export default function ParentDashboard() {
 
         {/* Global Controls / Avatar */}
         <div className="flex items-center gap-4">
+          <a
+            href={backendData?.analyst_panel_url || ANALYST_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[#DDE0D0] bg-[#FAF9F6] text-xs font-medium text-[#5A5A40] hover:bg-white transition"
+            title="Open C2 Analyst — screen scan & whitebox"
+          >
+            <span className={`w-2 h-2 rounded-full ${backendData?.analyst_status?.online ? "bg-emerald-500" : "bg-amber-400"}`} />
+            Analyst Panel
+          </a>
           <div className="text-right hidden md:block">
             <p className="text-xs font-semibold text-[#2D3025]">Nuwan Perera</p>
             <p className="text-[10px] text-[#6B705C]">Family Administrator</p>
@@ -669,6 +686,16 @@ export default function ParentDashboard() {
                 <TrendingUp className="w-4 h-4" />
                 Overview
               </button>
+              <a
+                href={backendData?.analyst_panel_url || ANALYST_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition text-[#6B705C] hover:bg-[#FAF9F6] hover:text-[#2D3025]"
+              >
+                <Monitor className="w-4 h-4" />
+                Hate Analyst
+                <span className={`ml-auto w-2 h-2 rounded-full ${backendData?.analyst_status?.online ? "bg-emerald-500" : "bg-amber-400"}`} />
+              </a>
               <button
                 onClick={() => {
                   setActiveSidebarTab("profile");
@@ -695,6 +722,16 @@ export default function ParentDashboard() {
                 <p className="opacity-80">{backendAvailable ? "100% Offline Mode" : "Running on Fallback Demo Data"}</p>
               </div>
             </div>
+
+            <a
+              href={backendData?.analyst_panel_url || ANALYST_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-1.5 py-2.5 px-4 bg-white hover:bg-[#FAF9F6] border border-[#DDE0D0] text-[#5A5A40] text-xs font-medium rounded-lg transition"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              Open Analyst Panel
+            </a>
 
             <Link
               href="/"

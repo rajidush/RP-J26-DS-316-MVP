@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from socratic_agent import SocraticAgentManager
 import dashboard_store
+import analyst_bridge
 
 
 app = FastAPI(
@@ -95,11 +96,19 @@ def trigger_threat(payload: ThreatTriggerRequest):
     Analyzes content threat scores against individual safety thresholds.
     - nsfw / adult content score > 0.80
     - violence_score > 0.80
-    - hate_speech_score > 0.80
+    - hate_speech_score > 0.80 (also filled from live C2 Analyst if client sends 0)
     - weapons_score > 0.75
     """
     threat_detected = False
     threat_type = "none"
+
+    # Prefer client score; if unset, pull live C2 Analyst hate reading (safe no-op if offline)
+    hate_score = float(payload.hate_speech_score or 0.0)
+    if hate_score <= 0.0:
+        try:
+            hate_score = float(analyst_bridge.hate_speech_score_from_latest() or 0.0)
+        except Exception:
+            hate_score = 0.0
 
     nsfw_val = max(payload.nsfw_score, payload.adult_content_score)
     if nsfw_val > 0.80:
@@ -108,7 +117,7 @@ def trigger_threat(payload: ThreatTriggerRequest):
     elif payload.violence_score > 0.80:
         threat_detected = True
         threat_type = "violence"
-    elif payload.hate_speech_score > 0.80:
+    elif hate_score > 0.80:
         threat_detected = True
         threat_type = "hate_speech"
     elif payload.weapons_score > 0.75:
@@ -230,42 +239,78 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
         completed=result["state_info"]["completed"]
     )
 
+@app.get("/api/analyst/status")
+def get_analyst_status():
+    """Live C2 Analyst panel + latest reading for main app / parent dashboard."""
+    try:
+        merged = analyst_bridge.get_merged_analyst_runs(limit=1)
+        return {
+            "ok": True,
+            "analyst_status": merged.get("analyst_status") or {},
+            "analyst_db_available": bool(merged.get("analyst_db_available")),
+            "analyst_stats": merged.get("analyst_stats") or {"total": 0, "hate": 0, "not_hate": 0},
+            "latest_run": merged.get("latest_run"),
+            "hate_speech_score": float(merged.get("hate_speech_score") or 0.0),
+            "panel_url": analyst_bridge.ANALYST_PANEL_URL,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "analyst_status": {"online": False, "panel_url": analyst_bridge.ANALYST_PANEL_URL},
+            "analyst_db_available": False,
+            "analyst_stats": {"total": 0, "hate": 0, "not_hate": 0},
+            "latest_run": None,
+            "hate_speech_score": 0.0,
+            "panel_url": analyst_bridge.ANALYST_PANEL_URL,
+            "error": str(e)[:160],
+        }
+
+
 @app.get("/api/parent/dashboard-data")
 def get_parent_dashboard_data(child_age: Optional[int] = None):
     """Returns all logged parent dashboard metrics, logs and history, plus calculated summary card metrics."""
     try:
         data = dashboard_store.get_dashboard_data()
-        
-        analyst_runs = data.get("analyst_runs", [])
+        bridge = analyst_bridge.get_merged_analyst_runs(limit=100)
+
+        # C2 Analyst DB is source of truth when available; else legacy JSON history
+        if bridge["analyst_db_available"]:
+            analyst_runs = bridge["analyst_runs"]
+        else:
+            analyst_runs = data.get("analyst_runs", [])
+
         socratic_sessions = data.get("socratic_sessions", [])
-        
-        # Filter by child_age if provided
+
+        hate_by_age = bridge.get("hate_speech_by_age") or {}
+        legacy_hate = data.get("hate_speech_detected", {})
+
         if child_age is not None:
             runs_filtered = [r for r in analyst_runs if r.get("child_age") == child_age]
             sessions_filtered = [s for s in socratic_sessions if s.get("child_age") == child_age]
-            
-            hate_speech_dict = data.get("hate_speech_detected", {})
-            hate_speech_detected = hate_speech_dict.get(str(child_age), 0)
-            
+            hate_speech_detected = hate_by_age.get(str(child_age))
+            if hate_speech_detected is None:
+                hate_speech_detected = legacy_hate.get(str(child_age), 0)
             screen_time_dict = data.get("screen_time_minutes", {})
             screen_time_minutes = screen_time_dict.get(str(child_age), 0)
         else:
             runs_filtered = analyst_runs
             sessions_filtered = socratic_sessions
-            
-            hate_speech_detected = sum(data.get("hate_speech_detected", {}).values())
+            hate_speech_detected = sum(hate_by_age.values()) or sum(legacy_hate.values())
             screen_time_minutes = sum(data.get("screen_time_minutes", {}).values())
-            
+
         content_intercepted = len(sessions_filtered)
         high_severity_alerts = len([r for r in runs_filtered if r.get("decision") == "hate"])
-        
+
         return {
             "analyst_runs": analyst_runs,
             "socratic_sessions": socratic_sessions,
             "content_intercepted": content_intercepted,
             "high_severity_alerts": high_severity_alerts,
             "hate_speech_detected": hate_speech_detected,
-            "screen_time_minutes": screen_time_minutes
+            "screen_time_minutes": screen_time_minutes,
+            "analyst_status": bridge["analyst_status"],
+            "analyst_stats": bridge["analyst_stats"],
+            "analyst_panel_url": analyst_bridge.ANALYST_PANEL_URL,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve dashboard history: {e}")
