@@ -40,6 +40,9 @@ class ZeroTrustGuard:
         self.nsfw_score = 0.0
         self.violence_score = 0.0
         self.weapons_score = 0.0
+        self.session_captured_frames: List[Dict] = []
+        self._prev_custom_filename = None
+        self._prev_smtc_title = None
         
         # Paths for local model
         self.backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -104,7 +107,31 @@ class ZeroTrustGuard:
             self.prev_frame_gray = None
             print(f"Zero-Trust Guard simulation mode set to: {mode}")
 
+    def _mark_frame_threat(self, filepath: str, threat: bool = True):
+        with self.lock:
+            for item in self.session_captured_frames:
+                if item["path"] == filepath:
+                    item["threat_detected"] = threat
+                    break
+
+    def _cleanup_clean_frames(self):
+        with self.lock:
+            retained_frames = []
+            for item in self.session_captured_frames:
+                path = item["path"]
+                if not item["threat_detected"]:
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                            print(f"Deleted clean frame: {path}")
+                    except Exception as e:
+                        print(f"Failed to delete clean frame {path}: {e}")
+                else:
+                    retained_frames.append(item)
+            self.session_captured_frames = retained_frames
+
     def reset(self):
+        self._cleanup_clean_frames()
         with self.lock:
             self.threat_score = 0.0
             self.threat_type = "none"
@@ -193,6 +220,11 @@ class ZeroTrustGuard:
             filename = f"{timestamp}_{timestamp_ms}.jpg"
             filepath = os.path.join("./captured_frames", filename)
             cv2.imwrite(filepath, frame)
+            with self.lock:
+                self.session_captured_frames.append({
+                    "path": filepath,
+                    "threat_detected": False
+                })
             return filepath
         except Exception as e:
             print(f"Failed to save captured frame: {e}")
@@ -354,8 +386,13 @@ class ZeroTrustGuard:
             print(f"Base64 decode failure: {e}")
             return self.get_state()
 
+        # Detect change of custom video file
+        if filename and filename != self._prev_custom_filename:
+            self._cleanup_clean_frames()
+            self._prev_custom_filename = filename
+
         # Save captured frame locally to directory
-        self._save_captured_frame(frame)
+        filepath = self._save_captured_frame(frame)
 
         # 2. Phase 1: Process Scan
         processes = self._scan_processes()
@@ -388,6 +425,10 @@ class ZeroTrustGuard:
         # 5. Phase 4: Tri-Model evaluation & object detection
         nsfw_score, violence_score, weapons_score, latency_ms, threat_type, detections = self._evaluate_tri_model_threats(frame, filename)
         threat_score = max(nsfw_score, violence_score, weapons_score)
+
+        is_threat = nsfw_score > 0.80 or violence_score > 0.80 or weapons_score > 0.75
+        if is_threat and filepath:
+            self._mark_frame_threat(filepath, True)
 
         # 6. Render bounding boxes directly onto visual stream frame
         try:
@@ -579,16 +620,26 @@ class ZeroTrustGuard:
         processes = self._scan_processes()
         playback = self._detect_playback(processes)
         
+        # Detect change of SMTC title
+        title = playback.get("smtc_title", "")
+        if title and title != self._prev_smtc_title:
+            self._cleanup_clean_frames()
+            self._prev_smtc_title = title
+
         # 2. Capture a frame using local grabber helper
         frame = self._capture_and_scene_change()
         
         if frame is not None:
             # Save the captured frame locally
-            self._save_captured_frame(frame)
+            filepath = self._save_captured_frame(frame)
             
             # Evaluate frame
             nsfw_score, violence_score, weapons_score, latency_ms, threat_type, detections = self._evaluate_tri_model_threats(frame, playback.get("smtc_title", ""))
             threat_score = max(nsfw_score, violence_score, weapons_score)
+            
+            is_threat = nsfw_score > 0.80 or violence_score > 0.80 or weapons_score > 0.75
+            if is_threat and filepath:
+                self._mark_frame_threat(filepath, True)
             
             # Draw overlay visualization
             try:

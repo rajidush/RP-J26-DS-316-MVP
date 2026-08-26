@@ -583,6 +583,8 @@ export default function SocraticPrototype() {
       setChatHistory([]);
       setChildEmotion("neutral");
       setAgreedToBoundary(false);
+      setVideoUrl("");
+      setVideoFilename("");
       
       const res = await fetch(`${BACKEND_URL}/api/guard/state`);
       if (res.ok) {
@@ -1644,8 +1646,8 @@ export default function SocraticPrototype() {
                     )}
                     
                     {interceptActive && (
-                      <div className="absolute inset-0 bg-[#2D3025]/90 backdrop-blur-xs flex items-center justify-center p-2 z-50 overflow-hidden" id="socratic-buddy-interceptor-vg">
-                        <div className="bg-white border border-[#DDE0D0] rounded-xl w-full h-full shadow-lg flex flex-col overflow-hidden relative" id="interceptor-dialog-card-vg">
+                      <div className="fixed inset-0 bg-[#2D3025]/80 backdrop-blur-md flex items-center justify-center p-4 md:p-6 z-[9999] overflow-hidden" id="socratic-buddy-interceptor-vg">
+                        <div className="bg-white border border-[#DDE0D0] rounded-2xl w-full max-w-lg shadow-2xl flex flex-col overflow-hidden h-[90vh] max-h-[600px] relative animate-fade-in" id="interceptor-dialog-card-vg">
                           {/* Safe Intervention Banner */}
                           <div className="bg-[#5A5A40] px-3 py-1.5 flex items-center justify-between text-white border-b border-[#DDE0D0] shrink-0">
                             <div className="flex items-center gap-1.5">
