@@ -345,7 +345,7 @@ export default function SocraticPrototype() {
 
   // Zero-Trust Guard States
   const [guardState, setGuardState] = useState<any>(null);
-  const [guardSimMode, setGuardSimMode] = useState<boolean>(true);
+  const [guardSimMode, setGuardSimMode] = useState<boolean>(false);
   const [guardActive, setGuardActive] = useState<boolean>(true);
 
   // C2 Analyst live readings (hate speech)
@@ -591,7 +591,7 @@ export default function SocraticPrototype() {
     
     const grabFrameAndProcess = async () => {
       const video = videoRef.current;
-      if (!video || video.paused || video.ended || guardSimMode) return;
+      if (!video || video.paused || video.ended || guardSimMode || !guardActive) return;
       
       try {
         const canvas = document.createElement("canvas");
@@ -674,12 +674,12 @@ export default function SocraticPrototype() {
       }
     };
     
-    if (!guardSimMode && videoUrl) {
+    if (!guardSimMode && videoUrl && guardActive) {
       interval = setInterval(grabFrameAndProcess, 2000);
     }
     
     return () => clearInterval(interval);
-  }, [guardSimMode, videoUrl, videoFilename, interceptActive, isCompleted, childAge]);
+  }, [guardSimMode, videoUrl, videoFilename, interceptActive, isCompleted, childAge, guardActive]);
 
   const resetGuardSession = async () => {
     try {
@@ -718,22 +718,7 @@ export default function SocraticPrototype() {
     toggleSimulationMode(false);
   };
 
-  const selectPresetVideo = async (type: "nature" | "combat") => {
-    if (videoUrl && videoUrl.startsWith("blob:")) {
-      URL.revokeObjectURL(videoUrl);
-    }
-    
-    await resetGuardSession();
-    
-    if (type === "nature") {
-      setVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4");
-      setVideoFilename("nature_wildlife_doc.mp4");
-    } else {
-      setVideoUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4");
-      setVideoFilename("combat_match_battle_violence.mp4");
-    }
-    toggleSimulationMode(false);
-  };
+
 
   // Code Hub state
   const [selectedCodeFile, setSelectedCodeFile] = useState<"agent" | "main" | "req" | "readme">("agent");
@@ -2029,10 +2014,9 @@ export default function SocraticPrototype() {
                   </div>
                 </div>
 
-                {/* Upload & Preset controls */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-[#DDE0D0] pt-4">
-                  {/* Upload */}
-                  <div className="flex flex-col gap-1.5">
+                {/* Upload Video Control */}
+                <div className="border-t border-[#DDE0D0] pt-4">
+                  <div className="flex flex-col gap-1.5 max-w-xs">
                     <span className="text-[10px] uppercase font-bold text-[#6B705C] font-sans">Upload Video File</span>
                     <label className="flex items-center justify-center gap-1.5 px-3 py-2 border border-[#DDE0D0] hover:border-[#5A5A40] rounded-lg bg-[#FAF9F6] text-xs font-semibold cursor-pointer text-[#6B705C] hover:text-[#2D3025] transition shadow-2xs">
                       📁 Choose Video File...
@@ -2048,33 +2032,6 @@ export default function SocraticPrototype() {
                         Playing: {videoFilename}
                       </div>
                     )}
-                  </div>
-
-                  {/* Presets */}
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] uppercase font-bold text-[#6B705C] font-sans">Pre-loaded Test Clips</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => selectPresetVideo("nature")}
-                        className={`text-xs py-2 px-1.5 border rounded-md font-semibold transition ${
-                          videoFilename === "nature_wildlife_doc.mp4" 
-                            ? "bg-emerald-600 text-white border-emerald-600 shadow-2xs" 
-                            : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200"
-                        }`}
-                      >
-                        🟢 Nature Video
-                      </button>
-                      <button
-                        onClick={() => selectPresetVideo("combat")}
-                        className={`text-xs py-2 px-1.5 border rounded-md font-semibold transition ${
-                          videoFilename === "combat_match_battle_violence.mp4"
-                            ? "bg-rose-600 text-white border-rose-600 shadow-2xs"
-                            : "bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200"
-                        }`}
-                      >
-                        💥 Combat Video
-                      </button>
-                    </div>
                   </div>
                 </div>
 
@@ -2153,16 +2110,7 @@ export default function SocraticPrototype() {
                       {guardState?.threat_score > 0.85 ? "🚨 INTERCEPT LOCKED" : "🛡️ ACTIVE MONITORING"}
                     </span>
                   </div>
-                  
-                  <button 
-                    onClick={async () => {
-                      await resetGuardSession();
-                      setLastInterceptionStatus("Ready & Guarding System");
-                    }}
-                    className="mt-2 py-2 px-3 bg-white hover:bg-slate-50 border border-[#DDE0D0] text-[#5A5A40] hover:text-[#2D3025] text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 shadow-2xs"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" /> Reset Detection State
-                  </button>
+
                 </div>
               </div>
 
@@ -2179,8 +2127,8 @@ export default function SocraticPrototype() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
                   <div className="bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg p-2.5 flex flex-col gap-1">
                     <span className="text-[10px] text-[#6B705C] uppercase font-semibold">Active File</span>
-                    <span className="font-bold text-[#2D3025] truncate" title={guardState?.video_name || "None"}>
-                      {guardState?.video_name || "No file playing"}
+                    <span className="font-bold text-[#2D3025] truncate" title={videoFilename || (guardState?.video_name && guardState.video_name !== "No active media session detected" ? guardState.video_name : "No file playing")}>
+                      {videoFilename || (guardState?.video_name && guardState.video_name !== "No active media session detected" ? guardState.video_name : "No file playing")}
                     </span>
                   </div>
                   
