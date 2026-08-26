@@ -780,9 +780,9 @@ export default function SocraticPrototype() {
           </div>
           <div>
             <h1 className="text-xl font-serif-natural font-semibold tracking-tight text-[#2D3025] flex items-center gap-2">
-              Socratic Digital Guard <span className="text-xs bg-[#E6D5C3]/40 text-[#5A5A40] px-2 py-0.5 rounded border border-[#DDE0D0] font-sans">Prototype V1.0</span>
+              J26-DS-316-MVP <span className="text-xs bg-[#E6D5C3]/40 text-[#5A5A40] px-2 py-0.5 rounded border border-[#DDE0D0] font-sans">Prototype V1.0</span>
             </h1>
-            <p className="text-xs text-[#6B705C]">Offline Pedagogical Cognitive Scaffold for Minor Safety</p>
+            <p className="text-xs text-[#6B705C]"></p>
           </div>
         </div>
 
@@ -798,7 +798,7 @@ export default function SocraticPrototype() {
             id="tab-sandbox-btn"
           >
             <Sliders className="w-4 h-4" />
-            Prototype Sandbox
+            Socratic Buddy
           </button>
           <button
             onClick={() => setActiveTab("videoGuard")}
@@ -812,18 +812,7 @@ export default function SocraticPrototype() {
             <Shield className="w-4 h-4" />
             Zero-Trust Video Guard
           </button>
-          <button
-            onClick={() => setActiveTab("codeHub")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${
-              activeTab === "codeHub" 
-                ? "bg-[#5A5A40] text-white shadow-sm" 
-                : "text-[#6B705C] hover:text-[#2D3025]"
-            }`}
-            id="tab-code-btn"
-          >
-            <Code className="w-4 h-4" />
-            Offline Python Hub
-          </button>
+          
           <Link
             href="/parent"
             className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition text-[#6B705C] hover:text-[#2D3025]"
@@ -844,7 +833,7 @@ export default function SocraticPrototype() {
             <section className="xl:col-span-5 flex flex-col gap-6" id="controls-section">
               
               {/* Connection & General Config */}
-              <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4" id="conn-panel">
+              {/* <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4" id="conn-panel">
                 <div className="flex items-center justify-between border-b border-[#DDE0D0] pb-3">
                   <h3 className="font-semibold text-[#2D3025] flex items-center gap-2 text-sm uppercase tracking-wider font-sans">
                     <Cpu className="w-4 h-4 text-[#5A5A40]" />
@@ -862,7 +851,7 @@ export default function SocraticPrototype() {
                     Connected to <strong className="text-[#2D3025]">Local Python Backend</strong> (<code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">{BACKEND_URL}</code>) &amp; <strong className="text-[#2D3025]">LM Studio</strong> (<code className="bg-[#F1F2EB] px-1 py-0.5 rounded text-[#2D3025]">http://localhost:1234</code>).
                   </div>
                 </div>
-              </div>
+              </div> */}
 
               {/* Perception Layer Slider Controls */}
               <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-5" id="perception-panel">
@@ -2027,11 +2016,11 @@ export default function SocraticPrototype() {
       <footer className="border-t border-[#DDE0D0] bg-[#FAF9F6] p-6 text-center text-[#6B705C] text-xs mt-auto" id="app-footer">
         <div className="max-w-[1200px] mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="flex items-center gap-1.5 justify-center">
-            Socratic Buddy is an offline child safety cognitive system protecting youth autonomy and digital wellbeing.
+            
           </p>
           <div className="flex items-center gap-4 text-[11px]" id="footer-links">
-            <span>License: MIT Offline Non-transit</span>
-            <span>Security Status: 100% Local Guard</span>
+            <span></span>
+            <span></span>
           </div>
         </div>
       </footer>
