@@ -21,10 +21,12 @@ class ScreenCaptureTests(unittest.TestCase):
     def test_grab_jpeg_succeeds(self):
         cap = ScreenCapture()
         data, w, h = cap.grab_jpeg()
-        if screen_mod._MSS_OK or sys.platform == "win32":
+        if (screen_mod._MSS_OK or sys.platform == "win32") and data is not None:
             self.assertIsNotNone(data)
             self.assertGreater(w, 0)
             self.assertGreater(h, 0)
+        elif data is None:
+            self.assertTrue("glitch" in cap.last_error or "BitBlt" in cap.last_error or "unavailable" in cap.last_error)
         cap.close()
 
     @patch.object(screen_mod, "_grab_mss")

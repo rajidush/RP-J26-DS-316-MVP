@@ -689,6 +689,8 @@ export default function SocraticPrototype() {
       setChatHistory([]);
       setChildEmotion("neutral");
       setAgreedToBoundary(false);
+      setVideoUrl("");
+      setVideoFilename("");
       
       const res = await fetch(`${BACKEND_URL}/api/guard/state`);
       if (res.ok) {
@@ -894,9 +896,9 @@ export default function SocraticPrototype() {
           </div>
           <div>
             <h1 className="text-xl font-serif-natural font-semibold tracking-tight text-[#2D3025] flex items-center gap-2">
-              Socratic Digital Guard <span className="text-xs bg-[#E6D5C3]/40 text-[#5A5A40] px-2 py-0.5 rounded border border-[#DDE0D0] font-sans">Prototype V1.0</span>
+              J26-DS-316-MVP <span className="text-xs bg-[#E6D5C3]/40 text-[#5A5A40] px-2 py-0.5 rounded border border-[#DDE0D0] font-sans">Prototype V1.0</span>
             </h1>
-            <p className="text-xs text-[#6B705C]">Offline Pedagogical Cognitive Scaffold for Minor Safety</p>
+            <p className="text-xs text-[#6B705C]"></p>
           </div>
         </div>
 
@@ -912,7 +914,7 @@ export default function SocraticPrototype() {
             id="tab-sandbox-btn"
           >
             <Sliders className="w-4 h-4" />
-            Prototype Sandbox
+            Socratic Buddy
           </button>
           <button
             onClick={() => setActiveTab("videoGuard")}
@@ -970,7 +972,7 @@ export default function SocraticPrototype() {
             <section className="xl:col-span-5 flex flex-col gap-6" id="controls-section">
               
               {/* Connection & General Config */}
-              <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4" id="conn-panel">
+              {/* <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-4" id="conn-panel">
                 <div className="flex items-center justify-between border-b border-[#DDE0D0] pb-3">
                   <h3 className="font-semibold text-[#2D3025] flex items-center gap-2 text-sm uppercase tracking-wider font-sans">
                     <Cpu className="w-4 h-4 text-[#5A5A40]" />
@@ -992,7 +994,7 @@ export default function SocraticPrototype() {
                     </span>
                   </div>
                 </div>
-              </div>
+              </div> */}
 
               {/* Perception Layer Slider Controls */}
               <div className="bg-white border border-[#DDE0D0] rounded-xl p-5 shadow-sm flex flex-col gap-5" id="perception-panel">
@@ -1913,8 +1915,8 @@ export default function SocraticPrototype() {
                     )}
                     
                     {interceptActive && (
-                      <div className="absolute inset-0 bg-[#2D3025]/90 backdrop-blur-xs flex items-center justify-center p-2 z-50 overflow-hidden" id="socratic-buddy-interceptor-vg">
-                        <div className="bg-white border border-[#DDE0D0] rounded-xl w-full h-full shadow-lg flex flex-col overflow-hidden relative" id="interceptor-dialog-card-vg">
+                      <div className="fixed inset-0 bg-[#2D3025]/80 backdrop-blur-md flex items-center justify-center p-4 md:p-6 z-[9999] overflow-hidden" id="socratic-buddy-interceptor-vg">
+                        <div className="bg-white border border-[#DDE0D0] rounded-2xl w-full max-w-lg shadow-2xl flex flex-col overflow-hidden h-[90vh] max-h-[600px] relative animate-fade-in" id="interceptor-dialog-card-vg">
                           {/* Safe Intervention Banner */}
                           <div className="bg-[#5A5A40] px-3 py-1.5 flex items-center justify-between text-white border-b border-[#DDE0D0] shrink-0">
                             <div className="flex items-center gap-1.5">
@@ -2294,11 +2296,11 @@ export default function SocraticPrototype() {
       <footer className="border-t border-[#DDE0D0] bg-[#FAF9F6] p-6 text-center text-[#6B705C] text-xs mt-auto" id="app-footer">
         <div className="max-w-[1200px] mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="flex items-center gap-1.5 justify-center">
-            Socratic Buddy is an offline child safety cognitive system protecting youth autonomy and digital wellbeing.
+            
           </p>
           <div className="flex items-center gap-4 text-[11px]" id="footer-links">
-            <span>License: MIT Offline Non-transit</span>
-            <span>Security Status: 100% Local Guard</span>
+            <span></span>
+            <span></span>
           </div>
         </div>
       </footer>
