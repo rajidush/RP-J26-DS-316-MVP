@@ -119,6 +119,22 @@ first (saturation + local contrast on a coarse grid, largest connected blob) and
 the branch **declines to ask** when no distinct picture is present. On a plain
 text page it correctly returns nothing — OCR already covers that.
 
+### 1b. Score the readings separately — do not concatenate them
+
+Measured when the branch was first switched on. A meme scoring **0.9961** from
+its OCR text alone fell to **0.70** once the model's description was appended
+to the same blob:
+
+    OCR              "NOBODY LIKES YOU  GO BACK TO YOUR COUNTRY"
+    image meaning    "a red circle with yellow text saying nobody likes you..."
+
+Descriptive prose *about* harmful content scores lower than the harmful content
+itself, so concatenating the two dilutes the signal. The pipeline now scores the
+read text (overlay + OCR + speech) and the picture reading **separately** and
+takes the higher of the two, which restored 0.9961 while keeping both readings
+visible as evidence. Clean cases are unaffected — a gaming screenshot still
+scores 0.18 and an abstract picture 0.08.
+
 ### 2. The model reads, the lexicon judges
 
 The VLM is never asked "is this hate". At 450M it cannot follow a strict label

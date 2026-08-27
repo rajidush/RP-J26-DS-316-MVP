@@ -26,6 +26,9 @@ the cascade needs to change when that lands.
 
 from __future__ import annotations
 
+import json
+import math
+from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
 from PIL import Image
@@ -51,6 +54,40 @@ def _dot(a: Sequence[float], b: Sequence[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
+# Trained by analyst/evaluation/train_image_probe.py. Absent by default — the
+# weights are gitignored, so a fresh clone runs uncalibrated until someone
+# trains one, which is the correct default.
+PROBE_PATH = Path(__file__).resolve().parents[1] / "models" / "image_probe.json"
+
+
+def _load_probe() -> Optional[dict]:
+    """Load the trained probe, but only if it earned its place.
+
+    `meets_bar` is written by the training script and reflects held-out AUC.
+    A probe that missed the bar is kept on disk for the record and deliberately
+    not loaded: letting an under-performing vision score into fusion is exactly
+    what cleared confirmed threats for ages 14-15 before.
+    """
+    try:
+        if not PROBE_PATH.is_file():
+            return None
+        probe = json.loads(PROBE_PATH.read_text(encoding="utf-8"))
+        if not probe.get("meets_bar"):
+            return None
+        if not probe.get("coef"):
+            return None
+        return probe
+    except Exception:
+        return None
+
+
+def _sigmoid(z: float) -> float:
+    if z >= 0:
+        return 1.0 / (1.0 + math.exp(-z))
+    ez = math.exp(z)
+    return ez / (1.0 + ez)
+
+
 class ImageFast:
     def __init__(
         self,
@@ -63,6 +100,11 @@ class ImageFast:
         # Only a probe trained on labelled data may move the fused score.
         # Zero-shot prompt banks are diagnostic evidence only — see docstring.
         self.calibrated = score_fn is not None
+        self._probe = None if score_fn is not None else _load_probe()
+        if self._probe is not None:
+            self.calibrated = True
+            self.name = f"clip-probe(auc {self._probe['dev_auc']})"
+            return
         if self._override is not None:
             self.name = "injected"
         elif self.embedder is not None and (
@@ -74,8 +116,8 @@ class ImageFast:
 
     def bind_embedder(self, embedder: ImageEmbedder) -> None:
         self.embedder = embedder
-        if self._override is not None:
-            return
+        if self._override is not None or self._probe is not None:
+            return  # a trained probe outranks whatever the embedder is called
         if embedder.name.startswith("clip") or embedder.name == "clip:pending":
             self.name = "clip-zeroshot-uncalibrated"
         else:
@@ -102,12 +144,26 @@ class ImageFast:
             emb = self.embedder.embed(image)
         if not emb or self.embedder is None:
             return 0.0
+        if self._probe is not None:
+            return self._probe_score(emb)
         if not (
             self.embedder.name.startswith("clip") or self.embedder.name == "clip:pending"
         ):
             return 0.0
 
         return self._zero_shot(emb)
+
+    def _probe_score(self, image_emb: List[float]) -> float:
+        """Trained logistic probe over the CLIP embedding."""
+        probe = self._probe
+        if len(image_emb) != probe.get("dim"):
+            # Embedder changed under the probe; refuse rather than score noise.
+            self.calibrated = False
+            self.name = "clip-probe-dim-mismatch"
+            self._probe = None
+            return 0.0
+        z = _dot(image_emb, probe["coef"]) + probe["intercept"]
+        return round(_sigmoid(z), 4)
 
     def _zero_shot(self, image_emb: List[float]) -> float:
         assert self.embedder is not None

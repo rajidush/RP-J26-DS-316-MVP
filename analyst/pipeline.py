@@ -151,6 +151,16 @@ class AnalystPipeline:
         latency["extract_ms"] = round((time.perf_counter() - t_extract) * 1000, 1)
         return ocr_text, transcript
 
+    def _score_text(self, blob: str, notes: list) -> ScoreDetail:
+        """Stage-1 text scoring that cannot take the tick down with it."""
+        if not (blob or "").strip():
+            return ScoreDetail(score=0.0, category="none")
+        try:
+            return self.text_fast.score_detailed(blob)
+        except Exception as exc:
+            notes.append(f"text_fast_failed:{type(exc).__name__}")
+            return ScoreDetail(score=0.0, category="none")
+
     def _read_picture(self, image, notes: list, latency: dict):
         """Vision-language reading of a meme/poster, if the branch is enabled.
 
@@ -196,17 +206,27 @@ class AnalystPipeline:
         ocr_text, transcript = self._extract(image, audio, notes, latency)
         reading = self._read_picture(image, notes, latency)
 
-        # --- text channel: every source of language, scored by one scorer ----
+        # --- text channel ----------------------------------------------------
+        # Two readings, scored separately and combined with max().
+        #
+        # They were concatenated into one blob at first, and that measurably
+        # weakened detection: a meme scoring 0.9961 on its OCR text alone fell
+        # to 0.70 once the vision model's *description* ("a red circle with
+        # yellow text saying...") was appended. Descriptive prose about harmful
+        # content dilutes the model's reading of the harmful content itself.
+        # Scoring each source on its own preserves whichever one is strongest.
         picture_words = reading.combined() if reading else ""
-        text_parts = [p for p in (overlay_text, ocr_text, transcript, picture_words) if p]
-        text_blob = " ".join(text_parts).strip()
+        read_blob = " ".join(p for p in (overlay_text, ocr_text, transcript) if p).strip()
 
         t_s1 = time.perf_counter()
-        try:
-            detail = self.text_fast.score_detailed(text_blob)
-        except Exception as exc:
-            notes.append(f"text_fast_failed:{type(exc).__name__}")
-            detail = ScoreDetail(score=0.0, category="none")
+        detail = self._score_text(read_blob, notes)
+        picture_detail = self._score_text(picture_words, notes) if picture_words else None
+        if picture_detail is not None and picture_detail.score > detail.score:
+            notes.append("picture_reading_led")
+            detail = picture_detail
+
+        # Kept whole for Stage 2, which re-reads text Stage 1 truncated.
+        text_blob = " ".join(p for p in (read_blob, picture_words) if p).strip()
         text_score, category, hits = detail.score, detail.category, list(detail.hits)
 
         # --- vision channel: judgements about pixels --------------------------
