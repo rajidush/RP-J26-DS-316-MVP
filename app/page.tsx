@@ -367,6 +367,12 @@ export default function SocraticPrototype() {
   const [hateSpeechScore, setHateSpeechScore] = useState<number>(0.1);
   const lastAnalystHateIdRef = useRef<string>("");
 
+  // A live reading is alerting when the Analyst says so — it already applied
+  // this child's persona threshold (0.55 / 0.65 / 0.75), which can sit well
+  // below 0.80. The fixed cut-off only describes the simulated slider.
+  const hateScoreIsAlerting =
+    analystLive.latest_run?.decision === "hate" || hateSpeechScore > 0.80;
+
   // Custom Video Upload & Analysis States
   const [videoUrl, setVideoUrl] = useState<string>("");
   const [videoFilename, setVideoFilename] = useState<string>("");
@@ -446,7 +452,9 @@ export default function SocraticPrototype() {
     const runId = String(run.id || "");
     if (!runId || runId === lastAnalystHateIdRef.current) return;
     const score = Number(run.risk_score || analystLive.hate_speech_score || 0);
-    if (score <= 0.80) return;
+    // No score gate here. The Analyst already decided against this child's age
+    // persona threshold (0.55 / 0.65 / 0.75) before writing decision="hate";
+    // a second 0.80 cut-off silently dropped real alerts for younger children.
 
     lastAnalystHateIdRef.current = runId;
     setHateSpeechScore(score);
@@ -463,6 +471,9 @@ export default function SocraticPrototype() {
             weapons_score: 0.1,
             hate_speech_score: score,
             child_age: childAge,
+            // Marks this as a real C2 detection: the backend resolves this run
+            // and trusts the Analyst's decision instead of re-thresholding.
+            analyst_run_id: runId,
           }),
         });
         if (!triggerRes.ok) return;
@@ -1131,7 +1142,7 @@ export default function SocraticPrototype() {
                           </span>
                         )}
                       </span>
-                      <span className={`font-bold ${hateSpeechScore > 0.80 ? "text-rose-600" : "text-[#6B705C]"}`}>
+                      <span className={`font-bold ${hateScoreIsAlerting ? "text-rose-600" : "text-[#6B705C]"}`}>
                         {hateSpeechScore.toFixed(2)}
                       </span>
                     </div>
@@ -1685,7 +1696,7 @@ export default function SocraticPrototype() {
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <div className="rounded-lg border border-[#DDE0D0] bg-[#FAF9F6] p-4">
                   <p className="text-[10px] uppercase tracking-wider text-[#6B705C] font-semibold">Hate Score</p>
-                  <p className={`text-2xl font-bold mt-1 ${hateSpeechScore > 0.8 ? "text-rose-600" : "text-[#2D3025]"}`}>
+                  <p className={`text-2xl font-bold mt-1 ${hateScoreIsAlerting ? "text-rose-600" : "text-[#2D3025]"}`}>
                     {hateSpeechScore.toFixed(2)}
                   </p>
                 </div>

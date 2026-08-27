@@ -3,6 +3,25 @@
 Eng plan: logistic probe on CLIP emb after Dataset C.
 Demo: cosine zero-shot vs harmful vs safe prompt banks.
 Missing CLIP → score 0.0, name=deferred (text path still works).
+
+Calibration status — why zero-shot does not move the score
+----------------------------------------------------------
+Measured on the demo assets, this branch returns 0.324-0.393 for everything:
+
+    01_clean_gaming   0.349      cosine margin +0.0069
+    02_hate_threat    0.393                    +0.0268
+    03_hate_identity  0.330                    -0.0015   (below the safe bank)
+    04_benign_chat    0.324                    -0.0044
+    05_vision_only    0.359                    +0.0115
+
+A 0.07 spread with the hate asset ranking below a benign one is noise. Fed into
+fusion it cleared a confirmed "you should kys" for ages 14-15 (see
+stage2/fusion.py). So the branch reports `calibrated = False` and fusion
+excludes it from the score while still showing it to the panel as evidence.
+
+`calibrated` flips to True when a probe trained on labelled data is injected
+(`score_fn`), which is the Milestone A2 / Step 6 deliverable. Nothing else in
+the cascade needs to change when that lands.
 """
 
 from __future__ import annotations
@@ -41,12 +60,15 @@ class ImageFast:
         self._override = score_fn
         self.embedder = embedder
         self._text_bank: Optional[tuple[List[List[float]], List[List[float]]]] = None
+        # Only a probe trained on labelled data may move the fused score.
+        # Zero-shot prompt banks are diagnostic evidence only — see docstring.
+        self.calibrated = score_fn is not None
         if self._override is not None:
             self.name = "injected"
         elif self.embedder is not None and (
             self.embedder.name.startswith("clip") or self.embedder.name == "clip:pending"
         ):
-            self.name = "clip-zeroshot"
+            self.name = "clip-zeroshot-uncalibrated"
         else:
             self.name = "deferred"
 
@@ -55,7 +77,7 @@ class ImageFast:
         if self._override is not None:
             return
         if embedder.name.startswith("clip") or embedder.name == "clip:pending":
-            self.name = "clip-zeroshot"
+            self.name = "clip-zeroshot-uncalibrated"
         else:
             self.name = "deferred"
 
@@ -96,7 +118,7 @@ class ImageFast:
                 self.name = "deferred"
                 return 0.0
             self._text_bank = (harm, safe)
-            self.name = "clip-zeroshot"
+            self.name = "clip-zeroshot-uncalibrated"
 
         harm, safe = self._text_bank
         max_h = max(_dot(image_emb, t) for t in harm)

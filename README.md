@@ -102,13 +102,26 @@ app/                     Shared Next.js sandbox for C3/C4 demo UI — not C2 det
 | Piece | Status |
 |---|---|
 | Cascade + RAM buffer + delete | **Working** |
-| Lexicon stage-1 (threat / bullying / gaming benign) | **Working** |
+| Stage-1 text: lexicon + patterns + 2 hate models + framing guard | **Working** |
 | `hate.detected` payload + child_safe_summary | **Working** |
 | CLI + `--replay` | **Working** |
-| OCR (RapidOCR) / ASR (Whisper tiny) | **Optional plugs** — install when needed |
+| OCR (RapidOCR) / ASR (Whisper tiny) | **Working** — install from `requirements.txt` |
+| Accuracy harness + dev/held-out corpora | **Working** — `analyst/evaluation/` |
 | CLIP / image_fast / text_full ONNX | **Deferred plugs** — Milestone A2/A3 |
 | ZeroMQ bus + C1 frame subscribe | **Later integration** |
 | Next.js / offline_backend web demo | **Teammate C3/C4 sandbox** — not used for C2 detection |
+
+### Measured accuracy (CPU, persona 8–10)
+
+| Scorer | dev set | held-out | held-out recall |
+|---|---|---|---|
+| Previous default (`toxic-comment-model`) | 58.2% | 50.0% | 5.0% |
+| Lexicon only | 94.0% | 52.5% | 5.0% |
+| **Shipped cascade** | 100.0% | **67.5%** | **40.0%** |
+
+The dev set designed the lexicon patterns, so only the held-out column speaks
+to generalisation — see [`analyst/evaluation/README.md`](analyst/evaluation/README.md)
+for the honest reading, including the buckets that still score 0%.
 
 ---
 

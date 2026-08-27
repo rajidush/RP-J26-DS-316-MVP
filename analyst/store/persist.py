@@ -113,6 +113,33 @@ def persist_result(
             "thumb_jpeg": thumb,
             "envelope": result.envelope.model_dump() if result.envelope else None,
             "trace": trace,
+            "evidence": build_evidence(result),
         }
     )
     return run_id
+
+
+def build_evidence(result: AnalystRunResult) -> dict:
+    """Why this run scored what it did — the audit trail behind the number.
+
+    Kept structured rather than folded into `notes` so the panel can render it
+    and a reviewer can answer "which detector fired, and was the score adjusted"
+    without parsing prose.
+    """
+    return {
+        "lexicon_score": round(float(result.lexicon_score or 0.0), 4),
+        "model_score": (
+            round(float(result.model_score), 4) if result.model_score is not None else None
+        ),
+        "model_labels": dict(result.model_labels or {}),
+        "framing_reason": result.framing_reason or "",
+        "score_before_framing": (
+            round(float(result.score_before_framing), 4)
+            if result.score_before_framing is not None
+            else None
+        ),
+        "vision_calibrated": bool(result.vision_calibrated),
+        "fusion_mode": result.fusion_mode or "idle",
+        "escalated": bool(result.escalated),
+        "explanation": result.explanation or "",
+    }

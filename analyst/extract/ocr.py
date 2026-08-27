@@ -1,13 +1,60 @@
-"""OCR — RapidOCR first, Tesseract fallback. Never raises into the pipeline."""
+"""OCR — RapidOCR first, Tesseract fallback. Never raises into the pipeline.
+
+Performance note (measured, 1000x220 chat screenshot, 12-core CPU)
+-----------------------------------------------------------------
+RapidOCR 3.x defaults are tuned for document scans, not screen capture, and
+cost 18.8 s per frame here — far past the 2.5 s capture tick, so the worker
+could never keep up:
+
+    default (PP-OCRv6 small, limit_type=min/736, all cores)   18760 ms
+    limit_type=max/960                                         4991 ms
+    + intra_op_num_threads=4                                   3166 ms
+    + PP-OCRv5 mobile det+rec, no angle classifier             1313 ms
+
+All four produced identical text. The dominant cost was the resize rule:
+`limit_type: min` scales the *shorter* side up to 736, so a 1000x220 chat bar
+became 3345x736 — a 2.5 MP detection input for one line of text. Capping the
+*longer* side instead is the correct rule for screenshots.
+
+The angle classifier is off because screen text is upright; re-enable it with
+ANALYST_OCR_CLS=1 if rotated content matters. Every knob is env-overridable so
+a slower, more thorough profile is one variable away.
+"""
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 import numpy as np
 from PIL import Image, ImageEnhance
 
 _MIN_WIDTH = 640
+
+# See the module docstring for the measurements behind these defaults.
+_DET_SIDE_LEN = int(os.environ.get("ANALYST_OCR_SIDE_LEN", "960"))
+_OCR_THREADS = int(os.environ.get("ANALYST_OCR_THREADS", "4"))
+_OCR_USE_CLS = os.environ.get("ANALYST_OCR_CLS", "0").strip() in ("1", "true", "yes")
+
+
+def _rapid3_params() -> dict:
+    """Screen-capture profile for RapidOCR 3.x (see module docstring)."""
+    from rapidocr import ModelType, OCRVersion
+
+    return {
+        # Cap the LONGER side. The default caps the shorter side, which upscales
+        # wide-and-short screenshots into megapixel detection inputs.
+        "Det.limit_type": "max",
+        "Det.limit_side_len": _DET_SIDE_LEN,
+        # PP-OCRv5 mobile: same text on our assets, ~2.4x faster than v6 small.
+        "Det.ocr_version": OCRVersion.PPOCRV5,
+        "Det.model_type": ModelType.MOBILE,
+        "Rec.ocr_version": OCRVersion.PPOCRV5,
+        "Rec.model_type": ModelType.MOBILE,
+        # Small models contend on 12 threads; 4 measured fastest here.
+        "EngineConfig.onnxruntime.intra_op_num_threads": _OCR_THREADS,
+        "Global.use_cls": _OCR_USE_CLS,
+    }
 
 
 def _preprocess(image: Image.Image) -> np.ndarray:
@@ -55,13 +102,24 @@ class OcrEngine:
         try:
             from rapidocr import RapidOCR
 
-            self._rapid = RapidOCR()
+            self._rapid = RapidOCR(params=_rapid3_params())
             self._rapid_api = "object"
             self.name = "rapidocr3"
             self.last_error = ""
         except Exception as exc:
-            self._rapid = None
-            self.last_error = f"rapidocr: {type(exc).__name__}: {exc}"
+            # A bad params key must not cost us OCR entirely — fall back to the
+            # library defaults (slow, but working) and say so.
+            try:
+                from rapidocr import RapidOCR
+
+                self._rapid = RapidOCR()
+                self._rapid_api = "object"
+                self.name = "rapidocr3-untuned"
+                self.last_error = f"tuned config rejected ({type(exc).__name__}); using defaults"
+                return
+            except Exception as exc2:
+                self._rapid = None
+                self.last_error = f"rapidocr: {type(exc2).__name__}: {exc2}"
 
     def _init_tesseract(self) -> None:
         try:

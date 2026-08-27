@@ -1,821 +1,613 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Guardian Analyst</title>
-  <style>
-    :root, [data-theme="light"] {
-      --bg: #f0f0f0;
-      --main: #ffffff;
-      --sidebar: #ececec;
-      --line: #d8d8d8;
-      --text: #333333;
-      --muted: #666666;
-      --teal: #0096a6;
-      --teal-hover: #007a87;
-      --green: #2eb82e;
-      --red: #d32f2f;
-      --orange: #e6a100;
-      --font: "Segoe UI", "Source Sans 3", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-      --mono: Consolas, "SF Mono", "DejaVu Sans Mono", ui-monospace, monospace;
-      --sidebar-w: 200px;
-    }
-    [data-theme="dark"] {
-      --bg: #1a1a1a;
-      --main: #252525;
-      --sidebar: #2d2d2d;
-      --line: #404040;
-      --text: #e8e8e8;
-      --muted: #aaaaaa;
-      --teal: #2bb8c9;
-      --teal-hover: #3dccdd;
-    }
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; }
-    body { font-family: var(--font); font-size: 14px; color: var(--text); background: var(--bg); }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guardian Analyst — C2</title>
+<style>
+/* ---------------------------------------------------------------------------
+   Design notes
+   - One accent hue; severity is carried by a dedicated scale so colour is
+     never the only signal (every state also has a label and an icon glyph).
+   - Contrast targets WCAG AA at minimum against both surfaces.
+   - Respects prefers-color-scheme and prefers-reduced-motion.
+   - System font stack: no webfont fetch, because the whole product is offline.
+--------------------------------------------------------------------------- */
+:root {
+  --bg:#f7f8fa; --surface:#ffffff; --surface-2:#f1f3f6; --line:#dde1e7;
+  --text:#1a1d23; --muted:#5b6472; --faint:#8892a0;
+  --accent:#1f6feb; --accent-soft:#e8f0fe;
+  --ok:#137a4b; --ok-soft:#e3f5ec;
+  --warn:#8a5a00; --warn-soft:#fdf3e0;
+  --alert:#b3261e; --alert-soft:#fdeceb;
+  --radius:10px; --radius-sm:6px;
+  --shadow:0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#0f1216; --surface:#171b21; --surface-2:#1e232b; --line:#2b323c;
+    --text:#e8ecf1; --muted:#a3adbb; --faint:#7d8794;
+    --accent:#5b9dff; --accent-soft:#16233a;
+    --ok:#4ade80; --ok-soft:#10251a;
+    --warn:#fbbf24; --warn-soft:#2a2110;
+    --alert:#ff6b60; --alert-soft:#2e1512;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#0f1216; --surface:#171b21; --surface-2:#1e232b; --line:#2b323c;
+  --text:#e8ecf1; --muted:#a3adbb; --faint:#7d8794;
+  --accent:#5b9dff; --accent-soft:#16233a;
+  --ok:#4ade80; --ok-soft:#10251a;
+  --warn:#fbbf24; --warn-soft:#2a2110;
+  --alert:#ff6b60; --alert-soft:#2e1512;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.skip{position:absolute;left:-9999px}
+.skip:focus{left:8px;top:8px;z-index:99;background:var(--surface);padding:8px 12px;border-radius:6px;box-shadow:var(--shadow)}
 
-    .app {
-      display: grid;
-      grid-template-columns: var(--sidebar-w) 1fr;
-      grid-template-rows: 1fr auto;
-      min-height: 100vh;
-    }
-    .sidebar {
-      grid-row: 1 / 3;
-      background: var(--sidebar);
-      border-right: 1px solid var(--line);
-      padding: 1rem 0;
-      display: flex;
-      flex-direction: column;
-    }
-    .brand {
-      padding: 0 1rem 1rem;
-      font-weight: 700;
-      font-size: 15px;
-      color: var(--teal);
-    }
-    .brand small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+/* layout */
+.wrap{max-width:1240px;margin:0 auto;padding:20px 20px 64px}
+header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;
+  padding:14px 0 18px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.brand{display:flex;align-items:center;gap:11px;min-width:0}
+.brand .mark{width:34px;height:34px;border-radius:9px;background:var(--accent);color:#fff;
+  display:grid;place-items:center;font-weight:700;font-size:15px;flex:none}
+.brand h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em}
+.brand p{margin:1px 0 0;font-size:12.5px;color:var(--muted)}
+.grid{display:grid;gap:16px;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}
+@media (max-width:1000px){.grid{grid-template-columns:1fr}}
 
-    .nav button {
-      width: 100%; border: 0; background: transparent;
-      text-align: left; font: inherit; font-size: 14px;
-      padding: 0.55rem 1rem; cursor: pointer; color: var(--text);
-      display: flex; align-items: center; gap: 0.5rem;
-    }
-    .nav button:hover { background: rgba(0,0,0,0.04); }
-    [data-theme="dark"] .nav button:hover { background: rgba(255,255,255,0.05); }
-    .nav button.active { color: var(--teal); font-weight: 600; }
-    .nav .ico { width: 20px; height: 20px; opacity: 0.75; flex-shrink: 0; }
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:16px 18px;margin-bottom:16px}
+.card h2{margin:0 0 3px;font-size:14px;font-weight:650;letter-spacing:-.005em}
+.card .sub{margin:0 0 14px;font-size:12.5px;color:var(--muted)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:10px}
 
-    .sidebar-foot {
-      margin-top: auto; padding: 0.75rem 1rem; border-top: 1px solid var(--line);
-      font-size: 11px; color: var(--muted);
-    }
-    .theme-btns { display: flex; gap: 4px; margin-top: 6px; }
-    .theme-btns button {
-      flex: 1; border: 1px solid var(--line); background: var(--main);
-      padding: 4px 0; font-size: 11px; cursor: pointer; border-radius: 3px;
-    }
-    .theme-btns button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
+/* status banner */
+.status{display:flex;gap:14px;align-items:flex-start;border-radius:var(--radius);
+  padding:16px 18px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);margin-bottom:16px}
+.status .dot{width:12px;height:12px;border-radius:50%;margin-top:6px;flex:none;background:var(--faint)}
+.status h2{margin:0;font-size:19px;font-weight:650;letter-spacing:-.015em}
+.status p{margin:3px 0 0;font-size:13.5px;color:var(--muted);max-width:62ch}
+.status.is-ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 34%,transparent)}
+.status.is-ok .dot{background:var(--ok)}
+.status.is-warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.status.is-warn .dot{background:var(--warn)}
+.status.is-alert{background:var(--alert-soft);border-color:color-mix(in srgb,var(--alert) 40%,transparent)}
+.status.is-alert .dot{background:var(--alert)}
 
-    .main {
-      background: var(--main);
-      padding: 1.25rem 1.5rem 1rem;
-      overflow: auto;
-    }
-    .page-head {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line);
-    }
-    .page-head h2 { margin: 0; font-size: 22px; font-weight: 400; color: var(--text); }
+/* controls */
+label{font-size:12.5px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px}
+input,select,textarea{font:inherit;color:var(--text);background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;width:100%}
+textarea{resize:vertical;min-height:74px}
+button{font:inherit;font-weight:600;font-size:13.5px;border-radius:var(--radius-sm);
+  border:1px solid var(--line);background:var(--surface);color:var(--text);
+  padding:8px 15px;cursor:pointer;transition:background .12s,border-color .12s}
+button:hover:not(:disabled){background:var(--surface-2)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover:not(:disabled){filter:brightness(1.07);background:var(--accent)}
+button.danger{color:var(--alert);border-color:color-mix(in srgb,var(--alert) 45%,var(--line))}
 
-    .view { display: none; }
-    .view.active { display: block; }
+/* pills / chips */
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:650;
+  padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted);
+  white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.pill.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.pill.alert{background:var(--alert-soft);color:var(--alert);border-color:transparent}
+.pill.info{background:var(--accent-soft);color:var(--accent);border-color:transparent}
 
-    /* Overview — ESET status block */
-    .overview-status {
-      display: flex; align-items: center; gap: 1.5rem;
-      padding: 1.5rem 0 1.25rem; margin-bottom: 0.5rem;
-    }
-    .shield-lg {
-      width: 72px; height: 72px; flex-shrink: 0;
-      border-radius: 50%; border: 3px solid var(--green);
-      display: grid; place-items: center; background: var(--main);
-    }
-    .shield-lg svg { width: 36px; height: 36px; fill: var(--green); }
-    .overview-status.threat .shield-lg { border-color: var(--red); }
-    .overview-status.threat .shield-lg svg { fill: var(--red); }
-    .overview-status.warn .shield-lg { border-color: var(--orange); }
-    .overview-status.warn .shield-lg svg { fill: var(--orange); }
-    .overview-status h3 { margin: 0; font-size: 20px; font-weight: 600; color: var(--green); }
-    .overview-status.threat h3 { color: var(--red); }
-    .overview-status.warn h3 { color: var(--orange); }
-    .overview-status p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 420px; }
-    .overview-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-    .btn {
-      border: 1px solid var(--line); background: var(--main);
-      padding: 6px 14px; font: inherit; font-size: 13px; cursor: pointer; border-radius: 3px;
-    }
-    .btn:disabled { opacity: 0.5; cursor: default; }
-    .btn-teal { background: var(--teal); color: #fff; border-color: var(--teal); }
-    .btn-teal:hover:not(:disabled) { background: var(--teal-hover); }
+/* score meter */
+.meter{margin:12px 0 4px}
+.meter .track{position:relative;height:10px;border-radius:999px;background:var(--surface-2);
+  border:1px solid var(--line);overflow:visible}
+.meter .fill{height:100%;border-radius:999px;background:var(--accent);transition:width .25s ease}
+.meter .fill.alert{background:var(--alert)} .meter .fill.warn{background:var(--warn)} .meter .fill.ok{background:var(--ok)}
+.meter .thresh{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--text);opacity:.65}
+.meter .thresh::after{content:attr(data-label);position:absolute;top:-19px;left:50%;transform:translateX(-50%);
+  font-size:10.5px;font-weight:650;color:var(--muted);white-space:nowrap}
+.meter .scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);margin-top:5px}
 
-    .mod-row {
-      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
-      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
-      margin-bottom: 1rem;
-    }
-    @media (max-width: 800px) { .mod-row { grid-template-columns: 1fr 1fr; } }
-    .mod-cell {
-      padding: 0.75rem 1rem; border-right: 1px solid var(--line);
-      font-size: 12px;
-    }
-    .mod-cell:last-child { border-right: 0; }
-    .mod-cell b { display: block; font-size: 13px; margin-bottom: 2px; }
-    .mod-cell span { color: var(--muted); }
-    .mod-cell.ok b { color: var(--green); }
-    .mod-cell.warn b { color: var(--orange); }
+/* evidence bars */
+.eb{margin:9px 0}
+.eb .lab{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px}
+.eb .lab .n{font-weight:600}
+.eb .lab .v{font-variant-numeric:tabular-nums;color:var(--muted)}
+.eb .bar{height:7px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.eb .bar i{display:block;height:100%;border-radius:999px;background:var(--accent)}
+.eb.muted .bar i{background:var(--faint)}
+.eb .why{font-size:11.5px;color:var(--faint);margin-top:3px}
 
-    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-    @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
-    .section-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 0.5rem; font-weight: 600; }
-    .ev-line { margin: 0 0 0.65rem; font-size: 13px; }
-    .ev-line label { display: block; color: var(--teal); font-weight: 600; font-size: 12px; margin-bottom: 2px; }
-    .ev-line pre, .ev-line p { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
-    .bars { margin: 0.5rem 0 0.75rem; }
-    .bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
-    .bar i { width: 48px; color: var(--muted); font-style: normal; }
-    .bar-track { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
-    .bar-fill { height: 100%; background: var(--teal); border-radius: 3px; }
-    .bar-fill.img { background: var(--orange); }
-    .bar-fill.aud { background: #4a90c4; }
-    .bar em { width: 36px; text-align: right; font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+/* activity list */
+.feed{list-style:none;margin:0;padding:0;max-height:460px;overflow-y:auto}
+.feed li{border-bottom:1px solid var(--line)}
+.feed li:last-child{border-bottom:0}
+.feed button.item{width:100%;text-align:left;border:0;background:transparent;padding:11px 8px;
+  border-radius:var(--radius-sm);display:flex;gap:11px;align-items:center}
+.feed button.item:hover{background:var(--surface-2)}
+.feed button.item[aria-current="true"]{background:var(--accent-soft)}
+.feed .sev{width:9px;height:9px;border-radius:50%;flex:none;background:var(--ok)}
+.feed .sev.alert{background:var(--alert)} .feed .sev.warn{background:var(--warn)}
+.feed .body{min-width:0;flex:1}
+.feed .t1{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed .t2{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed .sc{font-variant-numeric:tabular-nums;font-size:13px;font-weight:650;flex:none}
 
-    .thumb { max-width: 100%; max-height: 100px; border-radius: 4px; border: 1px solid var(--line); margin-top: 6px; }
-    .timeline { list-style: none; margin: 0; padding: 0; }
-    .timeline li {
-      padding: 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px;
-    }
-    .timeline li:hover { color: var(--teal); }
-    .tl-hate { color: var(--red); font-weight: 600; }
-    .tl-ok { color: var(--green); }
-    .tl-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+/* cascade trace */
+.trace{list-style:none;margin:6px 0 0;padding:0}
+.trace li{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
+.trace li:last-child{border-bottom:0}
+.trace .g{flex:none;width:15px;text-align:center;font-size:11px}
+.trace .nm{flex:1;min-width:0}
+.trace .dt{color:var(--muted);font-size:12px}
+.trace .ms{font-variant-numeric:tabular-nums;color:var(--faint);font-size:11.5px;flex:none}
+.g.ok{color:var(--ok)} .g.fail{color:var(--alert)} .g.skip{color:var(--faint)} .g.warn{color:var(--warn)}
 
-    /* Tools — ESET grid */
-    .tool-section { border-bottom: 1px solid var(--line); padding: 1rem 0; }
-    .tool-section:first-child { padding-top: 0; }
-    .tool-grid {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
-    }
-    @media (max-width: 900px) { .tool-grid { grid-template-columns: 1fr; } }
-    .tool-item {
-      display: grid; grid-template-columns: 56px 1fr; gap: 12px;
-      padding: 1rem 1.25rem 1rem 0; align-items: start;
-      border-right: 1px solid var(--line);
-    }
-    .tool-item:nth-child(3n) { border-right: 0; }
-    @media (max-width: 900px) { .tool-item { border-right: 0; border-bottom: 1px solid var(--line); } }
-    .tool-ico {
-      width: 48px; height: 48px; display: grid; place-items: center;
-      color: var(--muted);
-    }
-    .tool-ico svg { width: 40px; height: 40px; stroke: currentColor; fill: none; stroke-width: 1.2; }
-    .tool-item h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--teal); cursor: pointer; }
-    .tool-item h4:hover { text-decoration: underline; }
-    .tool-item p { margin: 4px 0 0; font-size: 12px; color: var(--muted); line-height: 1.35; }
-    .tool-item.soon h4 { color: var(--muted); cursor: default; }
-    .tool-item.soon h4:hover { text-decoration: none; }
-
-    .setup-grid { max-width: 360px; }
-    .setup-row { margin-bottom: 12px; }
-    .setup-row label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-    .setup-row input {
-      width: 100%; padding: 6px 8px; border: 1px solid var(--line);
-      border-radius: 3px; font: inherit; background: var(--main); color: var(--text);
-    }
-
-    .err { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 1em; }
-    .warn { color: #b8860b; font-size: 12px; margin-top: 8px; min-height: 1em; }
-
-    .statusbar {
-      grid-column: 2;
-      background: var(--sidebar);
-      border-top: 1px solid var(--line);
-      padding: 4px 1rem;
-      font-size: 11px; color: var(--muted);
-    }
-    .statusbar b { color: var(--green); font-weight: 600; }
-    .statusbar.threat b { color: var(--red); }
-
-
-    /* Pipeline diagram */
-    .dg-wrap { border: 1px solid var(--line); border-radius: 6px; background: var(--main);
-               padding: 14px 16px 10px; margin-bottom: 1rem; overflow-x: auto; }
-    .dg-wrap svg { display: block; width: 100%; min-width: 860px; height: auto; }
-    .dg-box { fill: var(--main); stroke: var(--line); stroke-width: 1.5; }
-    .dg-box.on { stroke: var(--teal); stroke-width: 2; }
-    .dg-box.gated { stroke-dasharray: 5 4; }
-    .dg-band { fill: var(--sidebar); stroke: none; }
-    .dg-t { fill: var(--text); font-size: 12.5px; font-weight: 600; }
-    .dg-m { fill: var(--muted); font-size: 11px; }
-    .dg-mono { fill: var(--teal); font-size: 11px; font-family: var(--mono); }
-    .dg-lbl { fill: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-    .dg-arrow { stroke: var(--line); stroke-width: 1.5; fill: none; }
-    .dg-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px;
-                 font-size: 11.5px; color: var(--muted); }
-    .dg-legend i { font-style: normal; display: inline-flex; align-items: center; gap: 6px; }
-    .dg-key { width: 16px; height: 0; border-top: 2px solid var(--line); display: inline-block; }
-    .dg-key.g { border-top-style: dashed; }
-    .dg-key.a { border-top-color: var(--teal); }
-    /* Whitebox */
-    .wb-card {
-      border: 1px solid var(--line); border-radius: 4px;
-      padding: 1rem 1.25rem; margin-bottom: 1rem; background: var(--main);
-    }
-    .wb-card h3 { margin: 0 0 4px; font-size: 16px; color: var(--teal); font-weight: 600; }
-    .wb-card p { margin: 0; font-size: 13px; color: var(--muted); }
-    .wb-exe { font-family: var(--mono); font-size: 14px; color: var(--text); margin-top: 6px; }
-    .wb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
-    @media (max-width: 900px) { .wb-grid { grid-template-columns: 1fr; } }
-    .trace-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .trace-table th {
-      text-align: left; font-size: 11px; color: var(--muted); font-weight: 600;
-      text-transform: uppercase; padding: 6px 8px; border-bottom: 1px solid var(--line);
-    }
-    .trace-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-    .trace-table tr:last-child td { border-bottom: 0; }
-    .st-ok { color: var(--green); font-weight: 600; }
-    .st-skip { color: var(--muted); }
-    .st-fail { color: var(--red); font-weight: 600; }
-    .st-warn { color: var(--orange); font-weight: 600; }
-    .trace-ms { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: right; white-space: nowrap; }
-    .app-list { list-style: none; margin: 0; padding: 0; }
-    .app-list li {
-      padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px;
-      display: flex; justify-content: space-between; gap: 8px;
-    }
-    .app-list li:last-child { border-bottom: 0; }
-    .app-list code { font-family: var(--mono); color: var(--teal); font-size: 12px; }
-    .tick-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; }
-    .tick-list li {
-      padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; cursor: pointer;
-    }
-    .tick-list li:hover { color: var(--teal); }
-    .tick-list li.on { color: var(--teal); font-weight: 600; }
-  </style>
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:12.5px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;font-variant-numeric:tabular-nums}
+.quote{background:var(--surface-2);border-left:3px solid var(--line);border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+  padding:9px 12px;font-size:13px;margin:8px 0;word-break:break-word}
+.quote .src{display:block;font-size:11px;font-weight:650;color:var(--faint);text-transform:uppercase;
+  letter-spacing:.04em;margin-bottom:3px}
+.empty{text-align:center;padding:34px 16px;color:var(--muted);font-size:13.5px}
+.empty .big{font-size:30px;display:block;margin-bottom:8px;opacity:.5}
+.err{background:var(--alert-soft);color:var(--alert);border-radius:var(--radius-sm);padding:9px 12px;
+  font-size:13px;margin-bottom:12px}
+.thumb{width:100%;border-radius:var(--radius-sm);border:1px solid var(--line);display:block}
+.note{font-size:11.5px;color:var(--faint);margin-top:7px}
+.mono{font-family:var(--mono);font-size:12px}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+hr.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
+</style>
 </head>
 <body>
-  <div class="app">
-    <aside class="sidebar">
-      <div class="brand">Guardian Analyst<small>Child guard</small></div>
-      <nav class="nav">
-        <button type="button" class="active" data-view="overview">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-          Overview
-        </button>
-        <button type="button" data-view="activity">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
-          Log files
-        </button>
-        <button type="button" data-view="whitebox">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-          Whitebox
-        </button>
-        <button type="button" data-view="tools">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-          Tools
-        </button>
-        <button type="button" data-view="setup">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-          Setup
-        </button>
-      </nav>
-      <div class="sidebar-foot">
-        Localhost only
-        <div class="theme-btns">
-          <button type="button" id="themeLight">Light</button>
-          <button type="button" id="themeDark">Dark</button>
+<a class="skip" href="#main">Skip to main content</a>
+<div class="wrap">
+
+<header class="top">
+  <div class="brand">
+    <div class="mark" aria-hidden="true">GA</div>
+    <div>
+      <h1>Guardian Analyst</h1>
+      <p>Component 2 &middot; on-device hate-speech detection &middot; nothing leaves this machine</p>
+    </div>
+  </div>
+  <div class="row">
+    <span id="backendPill" class="pill">checking…</span>
+    <button id="themeBtn" type="button" aria-label="Switch colour theme">Theme</button>
+  </div>
+</header>
+
+<div id="err" class="err" role="alert" hidden></div>
+
+<div id="status" class="status" role="status" aria-live="polite">
+  <span class="dot" aria-hidden="true"></span>
+  <div>
+    <h2 id="statusTitle">Starting…</h2>
+    <p id="statusText">Checking the detection engine.</p>
+  </div>
+</div>
+
+<main id="main" class="grid">
+
+  <!-- LEFT ------------------------------------------------------------- -->
+  <div>
+    <section class="card" aria-labelledby="h-mon">
+      <div class="spread">
+        <div>
+          <h2 id="h-mon">Screen &amp; audio monitoring</h2>
+          <p class="sub">Frames are analysed in memory and erased immediately. Only scores and a blurred preview are kept.</p>
         </div>
       </div>
-    </aside>
-
-    <main class="main">
-      <!-- OVERVIEW -->
-      <section class="view active" id="view-overview">
-        <div class="page-head"><h2 id="pageTitle">Overview</h2></div>
-        <div class="overview-status ok" id="overviewStatus">
-          <div class="shield-lg"><svg viewBox="0 0 24 24"><path d="M12 2l8 3v7c0 5.25-3.4 9.74-8 11-4.6-1.26-8-5.75-8-11V5l8-3zm-1 13.2l-3.2-3.2 1.4-1.4 1.8 1.8 4.4-4.4 1.4 1.4-5.8 5.8z" fill="currentColor" stroke="none"/></svg></div>
-          <div>
-            <h3 id="statusTitle">You are protected</h3>
-            <p id="statusSub">Press Enable to start monitoring.</p>
-          </div>
-          <div class="overview-actions">
-            <button class="btn btn-teal" id="btnStart" type="button">Enable protection</button>
-            <button class="btn" id="btnStop" type="button" disabled>Pause</button>
-          </div>
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:1;min-width:130px">
+          <label for="age">Child's age</label>
+          <select id="age">
+            <option value="9">8–10 years (most protective)</option>
+            <option value="12">11–13 years</option>
+            <option value="15">14–15 years</option>
+          </select>
         </div>
-        <div class="mod-row" id="modRow">
-          <div class="mod-cell ok" id="mOcr"><b>Screen text</b><span id="mOcrS">—</span></div>
-          <div class="mod-cell ok" id="mAsr"><b>Voice audio</b><span id="mAsrS">—</span></div>
-          <div class="mod-cell ok" id="mClip"><b>Image scan</b><span id="mClipS">—</span></div>
-          <div class="mod-cell ok" id="mText"><b>Text AI</b><span id="mTextS">—</span></div>
+        <div style="width:150px">
+          <label for="interval">Check every</label>
+          <select id="interval">
+            <option value="2.5">2.5 seconds</option>
+            <option value="5">5 seconds</option>
+            <option value="10">10 seconds</option>
+          </select>
         </div>
-        <div class="split">
-          <div>
-            <p class="section-title">Last scan</p>
-            <div class="bars" id="bars"></div>
-            <div class="ev-line"><label>OCR</label><pre id="ocr">—</pre></div>
-            <div class="ev-line"><label>Speech</label><pre id="asr">—</pre></div>
-            <div class="ev-line"><label>Image meaning</label><pre id="imgCaption">—</pre></div>
-            <div class="ev-line"><label>Text in image</label><pre id="imgText">—</pre></div>
-            <div class="ev-line"><label>Hits</label><p id="hits">—</p></div>
-            <div class="ev-line"><label>Summary</label><p id="summary">—</p></div>
-            <img id="thumb" class="thumb" alt="" hidden />
-            <div class="err" id="err"></div>
-          </div>
-          <div>
-            <p class="section-title">Recent</p>
-            <ul class="timeline" id="timelineHome"></ul>
-          </div>
+        <button id="btnStart" class="primary" type="button">Start monitoring</button>
+        <button id="btnStop" type="button" disabled>Stop</button>
+      </div>
+      <p class="note" id="sensitivityNote"></p>
+    </section>
+
+    <section class="card" aria-labelledby="h-feed">
+      <div class="spread">
+        <div>
+          <h2 id="h-feed">Recent checks</h2>
+          <p class="sub">Newest first. Select one to see why it was scored that way.</p>
         </div>
-      </section>
+        <span id="statsPill" class="pill">—</span>
+      </div>
+      <ul id="feed" class="feed" aria-label="Recent checks"></ul>
+    </section>
 
-      <!-- LOG FILES / ACTIVITY -->
-      <section class="view" id="view-activity">
-        <div class="page-head"><h2>Log files</h2></div>
-        <p class="section-title" id="statsLine">0 events</p>
-        <ul class="timeline" id="timeline"></ul>
-      </section>
-
-      <!-- WHITEBOX -->
-      <section class="view" id="view-whitebox">
-        <div class="page-head"><h2>Whitebox</h2></div>
-        <p style="font-size:13px;color:var(--muted);margin:-0.5rem 0 1rem">See what Guardian scans — app on screen + each pipeline step.</p>
-
-        <p class="section-title">How a tick flows</p>
-        <div class="dg-wrap">
-          <svg viewBox="0 0 980 400" role="img" aria-label="Analyst pipeline dataflow">
-            <rect class="dg-band" x="0" y="52" width="980" height="150" rx="4" opacity=".45"/>
-            <rect class="dg-band" x="0" y="214" width="980" height="74" rx="4" opacity=".45"/>
-
-            <text class="dg-lbl" x="8" y="26">Capture</text>
-            <text class="dg-lbl" x="206" y="26">Extract meaning</text>
-            <text class="dg-lbl" x="418" y="26">Stage 1 &#183; cheap</text>
-            <text class="dg-lbl" x="608" y="26">Stage 2 &#183; only if escalated</text>
-            <text class="dg-lbl" x="814" y="26">Decide</text>
-
-            <rect class="dg-box" id="dgBoxScreen" x="8" y="78" width="168" height="104" rx="5"/>
-            <text class="dg-t" x="22" y="100">Screen frame</text>
-            <text class="dg-mono" id="dgScreen" x="22" y="118">mss</text>
-            <text class="dg-m" x="22" y="140">every 2.5 s tick</text>
-            <text class="dg-m" x="22" y="157">SHA-1 dedupe:</text>
-            <text class="dg-m" x="22" y="173">same frame = skip</text>
-
-            <rect class="dg-box" id="dgBoxAudio" x="8" y="222" width="168" height="60" rx="5"/>
-            <text class="dg-t" x="22" y="243">Speaker loopback</text>
-            <text class="dg-mono" id="dgAudio" x="22" y="261">soundcard</text>
-            <text class="dg-m" x="22" y="276">4 s ring &#183; RMS gate 0.012</text>
-
-            <rect class="dg-box" id="dgBoxOcr" x="206" y="66" width="182" height="56" rx="5"/>
-            <text class="dg-t" x="220" y="88">Text on screen</text>
-            <text class="dg-mono" id="dgOcr" x="220" y="108">rapidocr</text>
-
-            <rect class="dg-box gated" id="dgBoxVlm" x="206" y="132" width="182" height="70" rx="5"/>
-            <text class="dg-t" x="220" y="154">Image meaning</text>
-            <text class="dg-mono" id="dgVlm" x="220" y="174">off</text>
-            <text class="dg-m" x="220" y="192">memes &#183; 384 px &#183; ~1 s</text>
-
-            <rect class="dg-box" id="dgBoxAsr" x="206" y="222" width="182" height="60" rx="5"/>
-            <text class="dg-t" x="220" y="243">Speech to text</text>
-            <text class="dg-mono" id="dgAsr" x="220" y="261">faster-whisper</text>
-            <text class="dg-m" x="220" y="276">only when sound passes gate</text>
-
-            <rect class="dg-box" id="dgBoxS1" x="418" y="118" width="160" height="98" rx="5"/>
-            <text class="dg-t" x="432" y="140">Lexicon screen</text>
-            <text class="dg-mono" id="dgText" x="432" y="160">lexicon</text>
-            <text class="dg-m" x="432" y="181">threshold &#952;1 = 0.35</text>
-            <text class="dg-m" x="432" y="199">below &#8594; stop, no cost</text>
-
-            <rect class="dg-box gated" id="dgBoxS2" x="608" y="118" width="176" height="98" rx="5"/>
-            <text class="dg-t" x="622" y="140">Confirm + fuse</text>
-            <text class="dg-mono" id="dgFull" x="622" y="160">text_full</text>
-            <text class="dg-m" x="622" y="181">text 0.60 / vision 0.40</text>
-            <text class="dg-m" x="622" y="199">meme bump when both mid</text>
-
-            <rect class="dg-box" id="dgBoxDecide" x="814" y="118" width="158" height="98" rx="5"/>
-            <text class="dg-t" x="828" y="140">Persona gate</text>
-            <text class="dg-m" x="828" y="161">8&#8211;10 &#952;2 = 0.55</text>
-            <text class="dg-m" x="828" y="180">11&#8211;13 &#952;2 = 0.65</text>
-            <text class="dg-m" x="828" y="199">14&#8211;15 &#952;2 = 0.75</text>
-
-            <rect class="dg-box" x="8" y="312" width="382" height="56" rx="5"/>
-            <text class="dg-t" x="22" y="334">Raw frame &amp; audio</text>
-            <text class="dg-m" x="22" y="352">RAM only &#8212; zeroed when the tick ends, never on disk</text>
-
-            <rect class="dg-box" x="418" y="312" width="160" height="56" rx="5"/>
-            <text class="dg-t" x="432" y="334">SQLite row</text>
-            <text class="dg-m" x="432" y="352">blurred thumb, 24 h TTL</text>
-
-            <rect class="dg-box" x="608" y="312" width="176" height="56" rx="5"/>
-            <text class="dg-t" x="622" y="334">hate.detected</text>
-            <text class="dg-m" x="622" y="352">child-safe summary &#8594; C3</text>
-
-            <rect class="dg-box" x="814" y="312" width="158" height="56" rx="5"/>
-            <text class="dg-t" x="828" y="334">hate.cleared</text>
-            <text class="dg-m" x="828" y="352">false-positive telemetry</text>
-
-            <defs>
-              <marker id="dgHead" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-                <path d="M0,0 L7,3.5 L0,7 Z" fill="var(--line)"/>
-              </marker>
-            </defs>
-            <g marker-end="url(#dgHead)">
-              <path class="dg-arrow" d="M176,104 L200,96"/>
-              <path class="dg-arrow" d="M176,152 L200,162"/>
-              <path class="dg-arrow" d="M176,252 L200,252"/>
-              <path class="dg-arrow" d="M388,94  L412,150"/>
-              <path class="dg-arrow" d="M388,167 L412,167"/>
-              <path class="dg-arrow" d="M388,252 L412,186"/>
-              <path class="dg-arrow" d="M578,167 L602,167"/>
-              <path class="dg-arrow" d="M784,167 L808,167"/>
-              <path class="dg-arrow" d="M696,216 L696,306"/>
-              <path class="dg-arrow" d="M893,216 L893,306"/>
-            </g>
-          </svg>
-
-          <div class="dg-legend">
-            <i><span class="dg-key"></span> runs every tick</i>
-            <i><span class="dg-key g"></span> gated &#8212; escalation, or a picture with no text</i>
-            <i><span class="dg-key a"></span> active in the last tick</i>
-          </div>
+    <section class="card" aria-labelledby="h-try">
+      <h2 id="h-try">Try it yourself</h2>
+      <p class="sub">Paste a message, or upload a screenshot or voice clip, and see exactly how it is judged.</p>
+      <label for="manualText">Message text</label>
+      <textarea id="manualText" placeholder="e.g. gg ez noob&#10;or paste a chat message to test"></textarea>
+      <div class="row" style="margin-top:10px;align-items:flex-end">
+        <div style="flex:1;min-width:150px">
+          <label for="fImage">Screenshot (optional)</label>
+          <input id="fImage" type="file" accept="image/*" />
         </div>
-
-
-        <div class="wb-card" id="wbApp">
-          <h3>On screen now</h3>
-          <div class="wb-exe" id="wbExe">—</div>
-          <p id="wbTitle">Enable protection to start.</p>
+        <div style="flex:1;min-width:150px">
+          <label for="fAudio">Voice clip (optional)</label>
+          <input id="fAudio" type="file" accept="audio/*" />
         </div>
-
-        <div class="mod-row" id="wbMods">
-          <div class="mod-cell ok"><b>Screen</b><span id="wbScreen">—</span></div>
-          <div class="mod-cell ok"><b>OCR</b><span id="wbOcr">—</span></div>
-          <div class="mod-cell ok"><b>Speech</b><span id="wbAsr">—</span></div>
-          <div class="mod-cell ok"><b>CLIP</b><span id="wbClip">—</span></div>
-        </div>
-
-        <div class="wb-grid">
-          <div>
-            <p class="section-title">Pipeline steps (last tick)</p>
-            <table class="trace-table">
-              <thead><tr><th>Step</th><th>Status</th><th>Detail</th><th></th></tr></thead>
-              <tbody id="wbSteps"></tbody>
-            </table>
-            <p id="wbExpl" style="font-size:12px;color:var(--muted);margin:8px 0 0"></p>
-          </div>
-          <div>
-            <p class="section-title">Recent apps scanned</p>
-            <ul class="app-list" id="wbApps"></ul>
-            <p class="section-title" style="margin-top:1rem">Tick history</p>
-            <ul class="tick-list" id="wbTicks"></ul>
-          </div>
-        </div>
-      </section>
-
-      <!-- TOOLS -->
-      <section class="view" id="view-tools">
-        <div class="page-head"><h2>Tools</h2></div>
-        <div class="tool-section">
-          <div class="tool-grid">
-            <div class="tool-item" id="toolAnalyze">
-              <div class="tool-ico"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></div>
-              <div><h4>Text check</h4><p>Paste one chat line. Instant hate scan.</p></div>
-            </div>
-            <div class="tool-item" id="toolReplay">
-              <div class="tool-ico"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg></div>
-              <div><h4>Demo assets</h4><p>Run CLI replay on demo PNG/WAV.</p></div>
-            </div>
-            <div class="tool-item">
-              <div class="tool-ico"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
-              <div><h4>Security report</h4><p>Threat count and scan stats.</p></div>
-            </div>
-          </div>
-        </div>
-        <div class="tool-section">
-          <div class="tool-grid">
-            <div class="tool-item" id="toolWhitebox">
-              <div class="tool-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
-              <div><h4>Process view</h4><p>Foreground app + recent scans.</p></div>
-            </div>
-            <div class="tool-item" id="toolTrace">
-              <div class="tool-ico"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
-              <div><h4>Pipeline trace</h4><p>Step-by-step OCR → fusion → decision.</p></div>
-            </div>
-            <div class="tool-item">
-              <div class="tool-ico"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg></div>
-              <div><h4>Export logs</h4><p>SQLite events stay local on device.</p></div>
-            </div>
-          </div>
-        </div>
-        <div id="toolPanel" hidden style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line)">
-          <input id="manualText" type="text" placeholder="Paste chat text…" style="width:100%;max-width:400px;padding:8px;border:1px solid var(--line);border-radius:3px;font:inherit" />
-          <button class="btn btn-teal" type="button" id="btnAnalyze" style="margin-top:8px">Run check</button>
-          <div class="err" id="errTools"></div>
-        </div>
-      </section>
-
-      <!-- SETUP -->
-      <section class="view" id="view-setup">
-        <div class="page-head"><h2>Setup</h2></div>
-        <div class="setup-grid">
-          <div class="setup-row"><label>Child age</label><input id="age" type="number" min="5" max="17" value="10" /></div>
-          <div class="setup-row"><label>Scan interval (seconds)</label><input id="interval" type="number" min="2" max="30" step="0.5" value="2.5" /></div>
-        </div>
-        <p style="font-size:12px;color:var(--muted);margin-top:1rem">RAM-only capture. Snippets + blurred thumb in DB.</p>
-      </section>
-    </main>
-
-    <footer class="statusbar" id="statusBar"><span id="statusBarText">Idle. <b>Ready.</b></span></footer>
+        <button id="btnAnalyze" class="primary" type="button">Check it</button>
+      </div>
+    </section>
   </div>
 
-  <script>
-    const $ = (id) => document.getElementById(id);
-    const TITLES = { overview: "Overview", activity: "Log files", whitebox: "Whitebox", tools: "Tools", setup: "Setup" };
-    let _wbTraces = [];
+  <!-- RIGHT ------------------------------------------------------------ -->
+  <div>
+    <section class="card" aria-labelledby="h-detail">
+      <h2 id="h-detail">Why this result</h2>
+      <p class="sub">Every number that moved the decision, and what was read from the screen.</p>
+      <div id="detail"></div>
+    </section>
 
-    function applyTheme(t) {
-      document.documentElement.setAttribute("data-theme", t);
-      localStorage.setItem("guardian-theme", t);
-      $("themeLight").classList.toggle("on", t === "light");
-      $("themeDark").classList.toggle("on", t === "dark");
-    }
-    applyTheme(localStorage.getItem("guardian-theme") || "light");
-    $("themeLight").onclick = () => applyTheme("light");
-    $("themeDark").onclick = () => applyTheme("dark");
+    <section class="card" aria-labelledby="h-health">
+      <h2 id="h-health">System health</h2>
+      <p class="sub">Which parts of the engine are running on this machine.</p>
+      <div id="health"></div>
+    </section>
+  </div>
+</main>
+</div>
 
-    document.querySelectorAll(".nav button").forEach((btn) => {
-      btn.onclick = () => {
-        document.querySelectorAll(".nav button").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
-        $("view-" + btn.dataset.view).classList.add("active");
-        $("pageTitle").textContent = TITLES[btn.dataset.view] || "Overview";
-      };
+<script>
+"use strict";
+/* ---------- helpers ---------------------------------------------------- */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const pct = (n) => Math.max(0, Math.min(100, (Number(n) || 0) * 100));
+const num = (n, d = 2) => (Number(n) || 0).toFixed(d);
+
+const THRESHOLDS = { 9: 0.55, 12: 0.65, 15: 0.75 };
+let selectedId = null, latestRuns = [], timer = null, capturing = false;
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(`${path} → ${res.status}`);
+  return res.json();
+}
+function showErr(msg) {
+  const el = $("err");
+  if (!msg) { el.hidden = true; return; }
+  el.hidden = false; el.textContent = msg;
+}
+
+/* ---------- theme ------------------------------------------------------ */
+(function theme() {
+  let saved = null;
+  try { saved = localStorage.getItem("ga-theme"); } catch (_) {}
+  if (saved) document.documentElement.setAttribute("data-theme", saved);
+  $("themeBtn").onclick = () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    const isDark = cur ? cur === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = isDark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("ga-theme", next); } catch (_) {}
+  };
+})();
+
+/* ---------- status banner ---------------------------------------------- */
+/* Plain language, because a parent reads this — not "protection_state=threat". */
+const STATUS_COPY = {
+  threat:   ["is-alert", "Something needs your attention",
+             "The most recent check found language that may be harmful. Open it below to see what was found."],
+  guarding: ["is-ok", "Monitoring is on",
+             "The screen and speaker audio are being checked. Nothing harmful found so far."],
+  reviewing:["is-warn", "Reviewing something",
+             "A check scored close to the limit for this age, but stayed below it. No alert was raised."],
+  degraded: ["is-warn", "Running with reduced capability",
+             "Part of the engine is unavailable, so some content may not be checked. See System health."],
+  idle:     ["", "Monitoring is off",
+             "Press Start monitoring to begin checking the screen, or use Try it yourself to test a message."]
+};
+function setStatus(state) {
+  const [cls, title, text] = STATUS_COPY[state] || STATUS_COPY.idle;
+  const el = $("status");
+  el.className = "status " + cls;
+  $("statusTitle").textContent = title;
+  $("statusText").textContent = text;
+}
+
+/* ---------- score meter ------------------------------------------------ */
+function meter(score, threshold) {
+  const s = pct(score), t = pct(threshold);
+  const cls = score >= threshold ? "alert" : (score >= threshold * 0.7 ? "warn" : "ok");
+  return `
+  <div class="meter">
+    <div class="track" role="img"
+         aria-label="Risk score ${num(score)} out of 1. The limit for this age is ${num(threshold)}.">
+      <div class="fill ${cls}" style="width:${s}%"></div>
+      <div class="thresh" style="left:${t}%" data-label="limit ${num(threshold)}"></div>
+    </div>
+    <div class="scale"><span>0.00 no risk</span><span>1.00 certain</span></div>
+  </div>`;
+}
+
+function bar(name, value, why, muted) {
+  return `<div class="eb ${muted ? "muted" : ""}">
+    <div class="lab"><span class="n">${esc(name)}</span><span class="v">${num(value)}</span></div>
+    <div class="bar"><i style="width:${pct(value)}%"></i></div>
+    ${why ? `<div class="why">${esc(why)}</div>` : ""}
+  </div>`;
+}
+
+/* ---------- detail pane ------------------------------------------------ */
+function renderDetail(run) {
+  const box = $("detail");
+  if (!run) {
+    box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">◎</span>
+      Select a check on the left, or test a message below, to see the full reasoning.</div>`;
+    return;
+  }
+  const ev = run.evidence || {};
+  const s1 = run.stage1 || {}, s2 = run.stage2 || {}, lat = run.latency_ms || {};
+  const age = Number(run.child_age) || 10;
+  const threshold = age <= 10 ? 0.55 : (age <= 13 ? 0.65 : 0.75);
+  const score = Number(run.score) || 0;
+  const isHate = run.decision === "hate";
+
+  const verdict = isHate
+    ? `<span class="pill alert">Flagged &middot; ${esc(run.category || "harm")}</span>`
+    : (ev.escalated ? `<span class="pill warn">Checked closely &middot; below the limit</span>`
+                    : `<span class="pill ok">Cleared at first check</span>`);
+
+  /* Evidence: which detector actually fired. */
+  const lex = Number(ev.lexicon_score ?? s1.lexicon_score ?? 0);
+  const mod = ev.model_score == null ? null : Number(ev.model_score);
+  const vis = Number(s1.vision_score ?? 0);
+  let evidence = bar("Word & phrase rules", lex,
+    lex >= 0.5 ? "Matched a known harmful phrase." : "No harmful phrase matched.");
+  if (mod != null) {
+    evidence += bar("Language model", mod,
+      mod >= 0.5 ? "The model judged this language harmful." : "The model did not judge this harmful.");
+  } else if (lex >= 0.88) {
+    /* Not an omission: the rules already matched at full confidence, so the
+       model was skipped on purpose. Saying nothing here reads as a failure. */
+    evidence += `<div class="eb muted"><div class="lab"><span class="n">Language model</span>
+      <span class="v">not run</span></div><div class="bar"><i style="width:0%"></i></div>
+      <div class="why">Skipped — the word rules already matched with full confidence,
+        so the model could not change the result.</div></div>`;
+  }
+  if (vis > 0) {
+    evidence += bar("Picture check", vis,
+      ev.vision_calibrated ? "Counted towards the score."
+        : "Not counted — this branch is not yet validated, so it cannot change the result.",
+      !ev.vision_calibrated);
+  }
+
+  const framing = ev.framing_reason
+    ? `<div class="quote"><span class="src">Score reduced</span>
+        This text looks like someone <strong>reporting or quoting</strong> harm rather than committing it
+        ${ev.score_before_framing != null
+          ? `— lowered from ${num(ev.score_before_framing)} to ${num(score)}.` : "."}
+        A child asking for help should never trigger an alert.</div>` : "";
+
+  /* What was actually read. */
+  const reads = [
+    ["On-screen text", run.ocr_snippet],
+    ["Speech heard", run.transcript_snippet],
+    ["Picture described as", run.image_caption],
+    ["Words inside the picture", run.image_text]
+  ].filter(([, v]) => (v || "").trim())
+   .map(([k, v]) => `<div class="quote"><span class="src">${esc(k)}</span>${esc(v)}</div>`)
+   .join("") || `<p class="note">Nothing readable was found in this check.</p>`;
+
+  const steps = (run.trace && run.trace.steps) || [];
+  const glyph = { ok: "✓", fail: "✕", skip: "–", warn: "!" };
+  const trace = steps.length ? `<ul class="trace">${steps.map(s => `
+      <li><span class="g ${esc(s.status)}" aria-hidden="true">${glyph[s.status] || "•"}</span>
+        <span class="nm">${esc(s.label)}<span class="vh"> — ${esc(s.status)}</span>
+          <div class="dt">${esc(s.detail || "")}</div></span>
+        <span class="ms">${s.ms ? num(s.ms, 0) + " ms" : ""}</span></li>`).join("")}</ul>` : "";
+
+  box.innerHTML = `
+    <div class="row" style="justify-content:space-between;margin-bottom:2px">
+      ${verdict}
+      <span class="pill">${esc(run.app_exe || "unknown")} &middot; ${esc((run.ts || "").slice(11, 19))}</span>
+    </div>
+    ${meter(score, threshold)}
+    <p class="note">Score <strong>${num(score)}</strong>; the limit for a ${age}-year-old is
+      <strong>${num(threshold)}</strong>. ${isHate
+        ? "Because the score reached the limit, an alert was raised."
+        : "Because the score stayed below the limit, no alert was raised."}</p>
+    ${run.child_safe_summary ? `<div class="quote"><span class="src">What the child would be told</span>${esc(run.child_safe_summary)}</div>` : ""}
+    ${framing}
+    <hr class="sep" />
+    <h2>What each check found</h2>
+    ${evidence}
+    ${(run.lexicon_hits || []).length
+      ? `<p class="note">Rules matched: ${run.lexicon_hits.map(h => `<code class="mono">${esc(h)}</code>`).join(", ")}</p>` : ""}
+    <hr class="sep" />
+    <h2>What was read from the screen</h2>
+    ${reads}
+    ${run.thumb_data_url ? `<img class="thumb" src="${run.thumb_data_url}" alt="Blurred preview of the screen at the time of this check" />
+      <p class="note">Blurred and shrunk on purpose. The original frame was erased from memory and never saved.</p>` : ""}
+    ${trace ? `<hr class="sep" /><h2>How the check ran</h2>${trace}` : ""}
+    <hr class="sep" />
+    <dl class="kv">
+      <dt>Combined score</dt><dd>${num(s2.fused ?? score)}</dd>
+      <dt>How it combined</dt><dd>${esc(ev.fusion_mode || "—")}</dd>
+      <dt>Total time</dt><dd>${num(lat.total_ms, 0)} ms</dd>
+    </dl>`;
+}
+
+/* ---------- feed -------------------------------------------------------- */
+function renderFeed(runs) {
+  const feed = $("feed");
+  if (!runs.length) {
+    feed.innerHTML = `<li><div class="empty"><span class="big" aria-hidden="true">◔</span>
+      No checks yet. Start monitoring, or test a message below.</div></li>`;
+    return;
+  }
+  feed.innerHTML = runs.map(r => {
+    const hate = r.decision === "hate";
+    const ev = r.evidence || {};
+    const sev = hate ? "alert" : (ev.escalated ? "warn" : "");
+    const when = (r.ts || "").slice(11, 19);
+    const what = hate ? `Flagged: ${r.category || "harm"}`
+      : (ev.escalated ? "Checked closely, cleared" : "Cleared");
+    return `<li><button class="item" type="button" data-id="${esc(r.id)}"
+        aria-current="${r.id === selectedId}">
+      <span class="sev ${sev}" aria-hidden="true"></span>
+      <span class="body">
+        <span class="t1">${esc(what)}</span>
+        <span class="t2">${esc(r.app_exe || "unknown")} &middot; ${esc(when)}</span>
+      </span>
+      <span class="sc">${num(r.score)}</span>
+    </button></li>`;
+  }).join("");
+  feed.querySelectorAll("button.item").forEach(b => {
+    b.onclick = () => { selectedId = b.dataset.id; paint(); };
+  });
+}
+
+/* ---------- health ------------------------------------------------------ */
+const BACKEND_COPY = {
+  ocr: "Reading text on screen",
+  asr: "Understanding speech",
+  text_fast: "Judging language (first check)",
+  text_full: "Re-reading long text (second check)",
+  image_fast: "Judging pictures",
+  clip: "Understanding images",
+  vision_meaning: "Describing pictures (memes)"
+};
+function renderHealth(status) {
+  const b = (status && status.backends) || {};
+  const rows = Object.keys(BACKEND_COPY).map(k => {
+    const v = String(b[k] ?? "none");
+    const off = v === "none" || v === "deferred" || v.endsWith("_failed");
+    const uncal = v.includes("uncalibrated");
+    const cls = off ? "warn" : (uncal ? "info" : "ok");
+    const word = off ? "not installed" : (uncal ? "shown, not counted" : "working");
+    return `<div class="spread" style="padding:6px 0;border-bottom:1px solid var(--line)">
+      <span style="font-size:13px">${esc(BACKEND_COPY[k])}</span>
+      <span class="pill ${cls}" title="${esc(v)}">${word}</span></div>`;
+  }).join("");
+  const err = status && status.last_error
+    ? `<p class="note" style="color:var(--warn)">${esc(status.last_error)}</p>` : "";
+  $("health").innerHTML = rows + err +
+    `<p class="note">“Shown, not counted” means a check runs and is displayed as evidence, but is not
+      allowed to change the score until it has been validated against labelled data.</p>`;
+}
+
+/* ---------- paint / refresh --------------------------------------------- */
+function paint() {
+  renderFeed(latestRuns);
+  const run = latestRuns.find(r => r.id === selectedId) || latestRuns[0] || null;
+  if (run) selectedId = run.id;
+  renderDetail(run);
+}
+
+async function refresh() {
+  try {
+    const [status, runsData] = await Promise.all([
+      api("/api/status"), api("/api/runs?limit=40")
+    ]);
+    showErr("");
+    capturing = !!status.capturing;
+    $("btnStart").disabled = capturing;
+    $("btnStop").disabled = !capturing;
+    setStatus(status.protection || (capturing ? "guarding" : "idle"));
+
+    const st = status.stats || {};
+    $("statsPill").textContent = `${st.total || 0} checked · ${st.hate || 0} flagged`;
+    const tf = (status.backends || {}).text_fast || "";
+    $("backendPill").textContent = tf.includes("hf:") ? "Models loaded" : "Rules only";
+    $("backendPill").className = "pill " + (tf.includes("hf:") ? "ok" : "warn");
+
+    latestRuns = runsData.runs || [];
+    renderHealth(status);
+    paint();
+  } catch (e) {
+    showErr("Cannot reach the Analyst service. Is `python -m analyst.serve` still running?");
+    setStatus("degraded");
+  }
+}
+
+/* ---------- actions ------------------------------------------------------ */
+$("age").onchange = () => {
+  const t = THRESHOLDS[$("age").value];
+  $("sensitivityNote").textContent =
+    `An alert is raised when the risk score reaches ${num(t)}. Younger ages use a lower limit, so more is flagged.`;
+};
+$("age").onchange();
+
+$("btnStart").onclick = async () => {
+  try {
+    await api("/api/capture/start", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ age: Number($("age").value), interval_s: Number($("interval").value) })
     });
-
-    $("toolAnalyze").onclick = () => { $("toolPanel").hidden = false; $("manualText").focus(); };
-    $("toolReplay").onclick = () => alert("CLI: python -m analyst --replay analyst/demo_assets --age 10");
-    $("toolWhitebox").onclick = () => document.querySelector('[data-view="whitebox"]').click();
-    $("toolTrace").onclick = () => document.querySelector('[data-view="whitebox"]').click();
-
-    function stClass(s) {
-      return { ok: "st-ok", skip: "st-skip", fail: "st-fail", warn: "st-warn" }[s] || "st-skip";
-    }
-
-    function renderTrace(trace) {
-      const steps = $("wbSteps");
-      steps.innerHTML = "";
-      if (!trace || !trace.steps) {
-        steps.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">No ticks yet — enable protection.</td></tr>';
-        $("wbExpl").textContent = "";
-        return;
-      }
-      for (const s of trace.steps) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${s.label}</td><td class="${stClass(s.status)}">${s.status}</td><td>${s.detail || "—"}</td><td class="trace-ms">${s.ms ? s.ms + " ms" : ""}</td>`;
-        steps.appendChild(tr);
-      }
-      const out = trace.outcome === "analyzed" ? (trace.decision === "hate" ? "Alert" : "Clear") : trace.outcome;
-      $("wbExpl").textContent = trace.explanation
-        ? `${out} · tick ${trace.tick || "—"} · ${trace.total_ms || 0} ms total — ${trace.explanation}`
-        : `${out} · tick ${trace.tick || "—"}`;
-    }
-
-
-    // Keep the dataflow diagram honest: show the model that is actually loaded
-    // at each step, and light up the path the last tick really took.
-    function renderDiagram(wb) {
-      const m = (wb && wb.modules) || {};
-      const short = (v) => {
-        const t = String(v || "none");
-        if (t === "none" || t === "deferred") return t;
-        return t.length > 26 ? t.slice(0, 25) + "\u2026" : t;
-      };
-      const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-
-      set("dgScreen", short(m.screen));
-      // Keep this short: the box is 168px and running/idle is already
-      // conveyed by the highlight.
-      set("dgAudio", String(m.audio || "none").replace("-loopback", ""));
-      set("dgOcr", short(m.ocr));
-      set("dgAsr", short(m.asr));
-      set("dgText", short(m.text_fast));
-      set("dgFull", short(m.text_full));
-      // Vision meaning: prefer the VLM, fall back to naming the CLIP stub.
-      const vlm = String(m.vision_meaning || "none");
-      set("dgVlm", vlm !== "none" ? short(vlm.replace(/^lmstudio:/, "")) : "off \u00b7 clip " + short(m.clip));
-
-      // Highlight from the last trace. Steps look like
-      // {id, label, status: ok|skip|fail, ms, detail}.
-      const tr = (wb && wb.last_trace) || null;
-      const steps = (tr && tr.steps) || [];
-      const byId = {};
-      for (const st of steps) byId[st.id] = st;
-      const ranOk = (id) => !!(byId[id] && byId[id].status === "ok");
-
-      const mark = (id, on) => {
-        const el = $(id);
-        if (el) el.classList.toggle("on", !!on);
-      };
-      const live = !!(tr && tr.outcome === "analyzed");
-      mark("dgBoxScreen", live && ranOk("capture"));
-      mark("dgBoxAudio", live && ranOk("audio"));
-      mark("dgBoxOcr", live && ranOk("ocr"));
-      mark("dgBoxAsr", live && ranOk("audio"));
-      mark("dgBoxVlm", live && ranOk("vlm"));
-      mark("dgBoxS1", live && ranOk("stage1"));
-      mark("dgBoxS2", live && ranOk("stage2"));
-      mark("dgBoxDecide", live && ranOk("decide"));
-    }
-
-    function renderWhitebox(wb) {
-      const app = wb.current_app || {};
-      $("wbExe").textContent = app.exe || "—";
-      $("wbTitle").textContent = app.title || (wb.capturing ? "No window title" : "Idle");
-      const m = wb.modules || {};
-      const ok = (v, keys) => keys.some((k) => String(v || "").includes(k));
-      $("wbScreen").textContent = m.screen || "—";
-      $("wbOcr").textContent = ok(m.ocr, ["rapid", "tesseract"]) ? "On" : (m.ocr || "—");
-      $("wbAsr").textContent = ok(m.asr, ["whisper", "faster"]) ? "On" : (m.asr || "—");
-      $("wbClip").textContent = ok(m.clip, ["clip"]) ? "On" : (m.clip || "—");
-
-      renderDiagram(wb);
-
-      _wbTraces = wb.traces || [];
-      renderTrace(wb.last_trace);
-
-      const apps = $("wbApps");
-      apps.innerHTML = "";
-      for (const a of wb.recent_apps || []) {
-        const li = document.createElement("li");
-        li.innerHTML = `<code>${a.exe}</code><span>${(a.last_ts || "").slice(11, 19) || "—"}</span>`;
-        apps.appendChild(li);
-      }
-      if (!apps.children.length) {
-        apps.innerHTML = '<li style="color:var(--muted)">—</li>';
-      }
-
-      const ticks = $("wbTicks");
-      ticks.innerHTML = "";
-      for (const t of _wbTraces) {
-        const li = document.createElement("li");
-        const tag = t.outcome === "analyzed" ? (t.decision === "hate" ? "Alert" : "Clear") : t.outcome;
-        li.textContent = `${(t.ts || "").slice(11, 19)} · ${tag} · ${(t.app && t.app.exe) || "?"}`;
-        li.dataset.tick = String(t.tick || "");
-        li.onclick = () => {
-          ticks.querySelectorAll("li").forEach((x) => x.classList.remove("on"));
-          li.classList.add("on");
-          renderTrace(t);
-        };
-        ticks.appendChild(li);
-      }
-    }
-
-    async function api(path, opts) {
-      const r = await fetch(path, opts);
-      if (!r.ok) throw new Error(await r.text());
-      return r.json();
-    }
-
-    function bar(label, val, cls) {
-      const p = Math.round((val || 0) * 100);
-      return `<div class="bar"><i>${label}</i><div class="bar-track"><div class="bar-fill ${cls || ""}" style="width:${p}%"></div></div><em>${(val||0).toFixed(2)}</em></div>`;
-    }
-
-    function setMod(cellId, spanId, name, okKeys) {
-      const n = String(name || "off");
-      const ok = okKeys.some((k) => n.includes(k)) && !/none|deferred|failed/.test(n);
-      $(cellId).className = "mod-cell " + (ok ? "ok" : "warn");
-      $(spanId).textContent = ok ? "On" : n.slice(0, 20);
-    }
-
-    function showRun(run) {
-      if (!run) return;
-      const hate = run.decision === "hate";
-      const st = $("overviewStatus");
-      st.className = "overview-status " + (hate ? "threat" : "ok");
-      $("statusTitle").textContent = hate ? "Security alert" : "You are protected";
-      const expl = (run.notes || []).find((n) => String(n).startsWith("explanation:"));
-      $("statusSub").textContent = expl
-        ? String(expl).replace(/^explanation:/, "").slice(0, 120)
-        : (run.child_safe_summary || (hate ? "Hate signal detected." : "No threat above threshold."));
-      const m = run.modalities || {};
-      $("bars").innerHTML = bar("Text", m.text) + bar("Image", m.image, "img") + bar("Audio", m.audio, "aud");
-      $("ocr").textContent = run.ocr_snippet || "—";
-      $("asr").textContent = run.transcript_snippet || "—";
-      // What the vision branch actually read out of the picture on screen.
-      $("imgCaption").textContent = run.image_caption || "—";
-      $("imgText").textContent = run.image_text || "—";
-      $("hits").textContent = (run.lexicon_hits || []).join(", ") || "—";
-      $("summary").textContent = run.child_safe_summary || "—";
-      if (run.thumb_data_url) { $("thumb").src = run.thumb_data_url; $("thumb").hidden = false; }
-      else $("thumb").hidden = true;
-    }
-
-    function fillTimeline(ul, runs) {
-      ul.innerHTML = "";
-      for (const r of runs || []) {
-        const li = document.createElement("li");
-        const hate = r.decision === "hate";
-        li.innerHTML = `<span class="${hate ? "tl-hate" : "tl-ok"}">${hate ? "Alert" : "Clear"} · ${(r.score??0).toFixed(2)}</span>
-          <div class="tl-meta">${(r.ts||"").slice(11,19)} · ${(r.ocr_snippet||r.transcript_snippet||"").slice(0,60)}</div>`;
-        li.onclick = () => { showRun(r); document.querySelector('[data-view="overview"]').click(); };
-        ul.appendChild(li);
-      }
-    }
-
-    async function refresh() {
-      try {
-        const st = await api("/api/status");
-        const on = !!st.capturing;
-        $("btnStart").disabled = on;
-        $("btnStop").disabled = !on;
-        const b = st.backends || {};
-        setMod("mOcr", "mOcrS", b.ocr, ["rapid", "tesseract"]);
-        setMod("mAsr", "mAsrS", b.asr, ["whisper", "faster"]);
-        // "Image scan" must report the branch that actually looks at pictures.
-        // CLIP is still deferred, so showing b.clip alone reads "deferred"
-        // forever even when the vision model is running.
-        const vmName = String(b.vision_meaning || "none");
-        setMod("mClip", "mClipS",
-               vmName !== "none" ? vmName.replace(/^lmstudio:/, "") : b.clip,
-               ["clip", "lfm", "vl", "lmstudio"]);
-        setMod("mText", "mTextS", b.text_fast, ["lexicon", "hf"]);
-
-        const sb = $("statusBar");
-        const stats = st.stats || {};
-        if (st.protection === "threat") {
-          sb.className = "statusbar threat";
-          $("statusBarText").innerHTML = `Monitoring. <b>Alert (${stats.hate || 0})</b>`;
-        } else if (on) {
-          sb.className = "statusbar";
-          $("statusBarText").innerHTML = `Monitoring. <b>Protected.</b>`;
-        } else {
-          sb.className = "statusbar";
-          $("statusBarText").innerHTML = `Idle. <b>Ready.</b>`;
-        }
-
-        if (!on && st.protection !== "threat") {
-          $("statusTitle").textContent = "You are protected";
-          $("statusSub").textContent = on ? "Live scan active." : "Press Enable to start.";
-        }
-        const err = st.last_error || "";
-        const errEl = $("err");
-        errEl.textContent = err;
-        errEl.className = err.startsWith("screen:") && on ? "warn" : "err";
-
-        const data = await api("/api/runs?limit=50");
-        const s = data.stats || stats;
-        $("statsLine").textContent = `${s.hate || 0} threats · ${s.total || 0} scans`;
-        fillTimeline($("timelineHome"), (data.runs || []).slice(0, 8));
-        fillTimeline($("timeline"), data.runs || []);
-        if (data.runs && data.runs[0]) showRun(data.runs[0]);
-
-        try {
-          const wb = await api("/api/whitebox");
-          renderWhitebox(wb);
-        } catch (_) { /* whitebox optional */ }
-      } catch (e) {
-        $("err").textContent = "Service offline";
-        $("statusBarText").innerHTML = `Error. <b>Check server.</b>`;
-      }
-    }
-
-    $("btnStart").onclick = async () => {
-      await api("/api/capture/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ age: +$("age").value || 10, interval_s: +$("interval").value || 2.5 }),
-      });
-      refresh();
-    };
-    $("btnStop").onclick = async () => { await api("/api/capture/stop", { method: "POST" }); refresh(); };
-    $("btnAnalyze").onclick = async () => {
-      const fd = new FormData();
-      fd.append("age", $("age").value || "10");
-      fd.append("text", $("manualText").value || "");
-      try {
-        const r = await fetch("/api/analyze", { method: "POST", body: fd });
-        if (!r.ok) throw new Error(await r.text());
-        const data = await r.json();
-        if (data.run) { showRun(data.run); document.querySelector('[data-view="overview"]').click(); }
-        refresh();
-      } catch (e) { $("errTools").textContent = String(e.message || e); }
-    };
-
     refresh();
-    setInterval(refresh, 2000);
-  </script>
+  } catch (e) { showErr("Could not start monitoring: " + e.message); }
+};
+$("btnStop").onclick = async () => {
+  try { await api("/api/capture/stop", { method: "POST" }); refresh(); }
+  catch (e) { showErr("Could not stop monitoring: " + e.message); }
+};
+
+$("btnAnalyze").onclick = async () => {
+  const btn = $("btnAnalyze");
+  const text = $("manualText").value.trim();
+  const img = $("fImage").files[0], aud = $("fAudio").files[0];
+  if (!text && !img && !aud) { showErr("Type a message, or choose a screenshot or voice clip first."); return; }
+  const fd = new FormData();
+  fd.append("age", $("age").value); fd.append("text", text);
+  if (img) fd.append("image", img);
+  if (aud) fd.append("audio", aud);
+  btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const res = await fetch("/api/analyze", { method: "POST", body: fd });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = await res.json();
+    showErr("");
+    selectedId = data.run_id;
+    await refresh();
+    $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) {
+    showErr("Could not check that: " + e.message);
+  } finally { btn.disabled = false; btn.textContent = "Check it"; }
+};
+
+/* ---------- boot --------------------------------------------------------- */
+refresh();
+timer = setInterval(refresh, 3000);
+document.addEventListener("visibilitychange", () => {
+  clearInterval(timer);
+  if (!document.hidden) { refresh(); timer = setInterval(refresh, 3000); }
+});
+</script>
 </body>
 </html>

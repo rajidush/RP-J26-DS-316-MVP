@@ -1,9 +1,24 @@
 """Core Analyst cascade — Engineering Plan §4.2 decision flow.
 
-Hardened for live capture:
-- OCR / ASR / CLIP failures isolate (do not crash the tick)
-- Fusion never dilutes a strong single modality
-- Modalities + explanation always populated for the panel
+Channel model
+-------------
+Text and vision are separate *channels*, and what belongs to each is decided by
+how the evidence was produced, not by where it came from:
+
+    text channel    overlay text, OCR, speech transcript, and any words a
+                    vision-language model read out of a picture. All of it is
+                    language, so all of it is scored by the same text scorer.
+
+    vision channel  judgements made about pixels themselves (image_fast).
+                    Currently uncalibrated, so it is shown but does not move
+                    the score — see stage1/image_fast.py and stage2/fusion.py.
+
+The previous version filed VLM-read text under "vision", which mixed a
+calibrated text score with an uncalibrated image score in the same number and
+made the fused result impossible to reason about.
+
+Hardened for live capture: every branch isolates its failures, so a broken OCR
+or model install degrades the run instead of killing the tick.
 """
 
 from __future__ import annotations
@@ -11,7 +26,7 @@ from __future__ import annotations
 import io
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import List, Optional
 
 from PIL import Image
 
@@ -23,8 +38,8 @@ from .extract.ocr import OcrEngine
 from .extract.vision_meaning import VisionMeaning
 from .schemas import AnalystRunResult, new_id
 from .stage1.image_fast import ImageFast
-from .stage1.text_fast import TextFast
-from .stage2.fusion import TextFull, explain_fusion, fusion_detail
+from .stage1.text_fast import ScoreDetail, TextFast
+from .stage2.fusion import Signal, TextFull, explain_fusion, fuse_signals
 
 
 def _image_from_bytes(data: Optional[bytes]) -> Optional[Image.Image]:
@@ -45,6 +60,10 @@ class AnalystPipeline:
         self.text_fast = TextFast()
         self.image_fast = ImageFast(embedder=self.embed)
         self.text_full = TextFull()
+        # Stage 2 reuses the Stage-1 scorer rather than loading a third model:
+        # its job is to re-read text Stage 1 truncated, not to hold an opinion
+        # of its own. See stage2.fusion.TextFull.
+        self.text_full.bind(lambda chunk: self.text_fast.score(chunk)[0])
         self.vision_meaning = VisionMeaning()
 
     def backends(self) -> dict:
@@ -79,7 +98,7 @@ class AnalystPipeline:
                 backends=self.backends(),
                 notes=notes,
                 protection_state="protected",
-                explanation="No media or text to analyse.",
+                explanation="Nothing to analyse — no text, image or audio in this tick.",
             )
 
         trigger_id = corr or new_id()
@@ -98,21 +117,10 @@ class AnalystPipeline:
         result.media_deleted = True
         return result
 
-    def _run(
-        self,
-        *,
-        child_age: int,
-        overlay_text: str,
-        frame: Optional[bytes],
-        audio: Optional[bytes],
-        app_exe: str,
-        app_category: str,
-        corr: str,
-        notes: list[str],
-        t0: float,
-    ) -> AnalystRunResult:
-        image = _image_from_bytes(frame)
-        latency: dict[str, float] = {}
+    # -- extraction -----------------------------------------------------------
+
+    def _extract(self, image, audio, notes: list, latency: dict):
+        """OCR and ASR concurrently; neither may take the tick down with it."""
 
         def _timed_ocr():
             t = time.perf_counter()
@@ -141,9 +149,67 @@ class AnalystPipeline:
         latency["ocr_ms"] = ocr_ms
         latency["asr_ms"] = asr_ms
         latency["extract_ms"] = round((time.perf_counter() - t_extract) * 1000, 1)
+        return ocr_text, transcript
 
-        combined = " ".join(p for p in (overlay_text, ocr_text, transcript) if p).strip()
+    def _read_picture(self, image, notes: list, latency: dict):
+        """Vision-language reading of a meme/poster, if the branch is enabled.
 
+        Not gated on escalation: a meme is precisely the case where Stage 1 sees
+        nothing, so gating would close the branch exactly when it is needed. The
+        cost control is the crop (extract/region.py), which also stops a small
+        VLM inventing content about browser chrome.
+        """
+        if not (self.vision_meaning.enabled and image is not None):
+            return None
+        try:
+            reading = self.vision_meaning.read(image)
+        except Exception as exc:
+            notes.append(f"vision_meaning_failed:{type(exc).__name__}")
+            return None
+        latency["vlm_ms"] = reading.ms
+        if reading.error:
+            notes.append("vision_meaning_unavailable")
+        elif "no_image_region" in reading.notes:
+            notes.append("no_image_region")
+        elif reading.any_text:
+            notes.append("vision_meaning_read")
+        return reading
+
+    # -- main ------------------------------------------------------------------
+
+    def _run(
+        self,
+        *,
+        child_age: int,
+        overlay_text: str,
+        frame: Optional[bytes],
+        audio: Optional[bytes],
+        app_exe: str,
+        app_category: str,
+        corr: str,
+        notes: list[str],
+        t0: float,
+    ) -> AnalystRunResult:
+        image = _image_from_bytes(frame)
+        latency: dict[str, float] = {}
+
+        ocr_text, transcript = self._extract(image, audio, notes, latency)
+        reading = self._read_picture(image, notes, latency)
+
+        # --- text channel: every source of language, scored by one scorer ----
+        picture_words = reading.combined() if reading else ""
+        text_parts = [p for p in (overlay_text, ocr_text, transcript, picture_words) if p]
+        text_blob = " ".join(text_parts).strip()
+
+        t_s1 = time.perf_counter()
+        try:
+            detail = self.text_fast.score_detailed(text_blob)
+        except Exception as exc:
+            notes.append(f"text_fast_failed:{type(exc).__name__}")
+            detail = ScoreDetail(score=0.0, category="none")
+        text_score, category, hits = detail.score, detail.category, list(detail.hits)
+
+        # --- vision channel: judgements about pixels --------------------------
         t_clip = time.perf_counter()
         try:
             emb = self.embed.embed(image) if image is not None else []
@@ -152,104 +218,73 @@ class AnalystPipeline:
             emb = []
         latency["clip_ms"] = round((time.perf_counter() - t_clip) * 1000, 1)
 
-        t_s1 = time.perf_counter()
-        try:
-            text_score, category, hits = self.text_fast.score(combined)
-        except Exception as exc:
-            notes.append(f"text_fast_failed:{type(exc).__name__}")
-            text_score, category, hits = 0.0, "none", []
         try:
             vision_score = self.image_fast.score(embedding=emb, image=image)
         except Exception as exc:
             notes.append(f"image_fast_failed:{type(exc).__name__}")
             vision_score = 0.0
+        vision_calibrated = bool(getattr(self.image_fast, "calibrated", False))
         latency["stage1_ms"] = round((time.perf_counter() - t_s1) * 1000, 1)
 
-        if not combined and image is not None and self.image_fast.name == "deferred":
-            notes.append("image_without_text_vision_deferred")
-        elif not combined and vision_score >= STAGE1_THETA:
+        if vision_score > 0.0 and not vision_calibrated:
+            notes.append("vision_uncalibrated_excluded")
+
+        self._note_channels(ocr_text, transcript, picture_words, image, notes)
+
+        stage1 = {
+            "text_score": round(text_score, 4),
+            "lexicon_score": round(detail.lexicon_score, 4),
+            "model_score": round(detail.model_score, 4) if detail.model_score is not None else 0.0,
+            "vision_score": round(vision_score, 4),
+        }
+
+        # --- escalation: only calibrated evidence may escalate ---------------
+        vision_escalates = vision_calibrated and vision_score >= STAGE1_THETA
+        escalated = text_score >= STAGE1_THETA or vision_escalates
+
+        # Vision-only: a picture carried the signal and there were no words to
+        # read. The category cannot come from the text scorer, so it comes from
+        # what the vision branch is trained to look for (hateful imagery).
+        # Uncalibrated vision can never reach here — it does not escalate.
+        if vision_escalates and not text_blob:
             notes.append("vision_only_escalation")
             if category == "none":
                 category = "hate_identity"
 
-        if ocr_text and transcript:
-            notes.append("multimodal_ocr_asr")
-        elif transcript and not ocr_text:
-            notes.append("asr_primary")
-        elif ocr_text and not transcript:
-            notes.append("ocr_primary")
+        if not escalated:
+            notes.append("stopped_at_stage1")
 
-        escalated = text_score >= STAGE1_THETA or vision_score >= STAGE1_THETA
-        stage1 = {
-            "text_score": round(text_score, 4),
-            "vision_score": round(vision_score, 4),
-        }
-
-        # ---- Vision branch -------------------------------------------------
-        # This is not a latency-critical system, so we do NOT gate on stage-1
-        # escalation any more: a meme is exactly the case where stage 1 sees
-        # nothing. We run whenever a distinct picture is on screen. The cost
-        # control is the crop (region.py), which also stops the model
-        # hallucinating about browser chrome.
-        reading = None
-        if self.vision_meaning.enabled and image is not None:
-            reading = self.vision_meaning.read(image)
-            latency["vlm_ms"] = reading.ms
-            if reading.error:
-                notes.append("vision_meaning_unavailable")
-            elif "no_image_region" in reading.notes:
-                notes.append("no_image_region")
-            elif reading.any_text:
-                notes.append("vision_meaning_read")
-                seen = reading.combined()
-                try:
-                    v_score, v_cat, v_hits = self.text_fast.score(seen)
-                except Exception as exc:
-                    notes.append(f"vision_meaning_score_failed:{type(exc).__name__}")
-                    v_score, v_cat, v_hits = 0.0, "none", []
-                if v_score > vision_score:
-                    vision_score = v_score
-                    notes.append("vision_meaning_used")
-                    if category == "none" and v_cat != "none":
-                        category = v_cat
-                    if v_hits:
-                        hits = list(hits) + [h for h in v_hits if h not in hits]
-                stage1["vision_score"] = round(vision_score, 4)
-                escalated = escalated or vision_score >= STAGE1_THETA
-
+        # --- stage 2 ----------------------------------------------------------
         t_s2 = time.perf_counter()
-        full = self.text_full.score(combined, text_score)
-        detail = fusion_detail(full, vision_score)
-        fused = float(detail["fused"])
-        if self.image_fast.name == "deferred" or vision_score <= 0.0:
-            fused = max(fused, full)
-            notes.append("fusion_text_dominant")
-        if not combined and vision_score >= STAGE1_THETA:
-            fused = max(fused, vision_score)
-            notes.append("fusion_vision_dominant")
+        full_text_score = text_score
+        if escalated:
+            try:
+                full_text_score = self.text_full.score(text_blob, text_score)
+                if full_text_score > text_score:
+                    notes.append("stage2_found_more_in_full_text")
+            except Exception as exc:
+                notes.append(f"text_full_failed:{type(exc).__name__}")
 
-        stage2 = {
-            "text_full": round(full, 4),
-            "vision_score": round(vision_score, 4),
-            "fused": fused,
-            "text_weight": float(detail["text_weight"]),
-            "vision_weight": float(detail["vision_weight"]),
-            "weighted": float(detail["weighted"]),
-            "meme_bump": 1.0 if detail["meme_bump"] else 0.0,
-        }
+        fusion = fuse_signals(
+            [
+                Signal("text", full_text_score, True, "ocr/asr/overlay/vlm"),
+                Signal("vision", vision_score, vision_calibrated, self.image_fast.name),
+            ]
+        )
         latency["stage2_ms"] = round((time.perf_counter() - t_s2) * 1000, 1)
 
-        if escalated:
-            risk = fused
-        else:
-            risk = round(max(text_score, vision_score), 4)
-            notes.append("stopped_at_stage1")
+        # stage2 stays numeric — the mode is carried by result.fusion_mode.
+        stage2 = dict(fusion.as_dict())
+        stage2["text_full"] = round(full_text_score, 4)
+        if not escalated:
             stage2["preview"] = 1.0
+
+        risk = fusion.fused if escalated else round(max(text_score, 0.0), 4)
 
         decision, envelope, payload, cleared, mods = decide(
             text_score=text_score,
-            vision_score=vision_score,
-            fused_score=risk if escalated else fused,
+            vision_score=vision_score if vision_calibrated else 0.0,
+            fused_score=risk,
             category=category if escalated else "none",
             escalated=escalated,
             child_age=child_age,
@@ -261,11 +296,7 @@ class AnalystPipeline:
             corr=corr,
         )
 
-        # Decision risk: payload score on hate; else stage-1 max (honest for panel)
-        if payload is not None:
-            risk_out = float(payload.score)
-        else:
-            risk_out = round(max(text_score, vision_score), 4)
+        risk_out = float(payload.score) if payload is not None else round(text_score, 4)
 
         if decision == "hate":
             protection = "threat"
@@ -279,12 +310,15 @@ class AnalystPipeline:
         explanation = explain_fusion(
             text_score=text_score,
             vision_score=vision_score,
-            fused=fused,
+            fused=risk,
             escalated=escalated,
             decision=decision,
             has_ocr=bool(ocr_text.strip()),
             has_asr=bool(transcript.strip()),
             lexicon_hits=hits,
+            vision_calibrated=vision_calibrated,
+            framing_reason=detail.framing_reason,
+            model_score=detail.model_score,
         )
 
         latency["total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
@@ -310,4 +344,30 @@ class AnalystPipeline:
             explanation=explanation,
             protection_state=protection,  # type: ignore[arg-type]
             lexicon_hits=list(hits[:10]),
+            lexicon_score=round(detail.lexicon_score, 4),
+            model_score=detail.model_score,
+            framing_reason=detail.framing_reason,
+            score_before_framing=detail.discounted_from,
+            vision_calibrated=vision_calibrated,
+            fusion_mode=fusion.mode,
+            escalated=escalated,
         )
+
+    @staticmethod
+    def _note_channels(
+        ocr_text: str,
+        transcript: str,
+        picture_words: str,
+        image,
+        notes: List[str],
+    ) -> None:
+        if ocr_text and transcript:
+            notes.append("multimodal_ocr_asr")
+        elif transcript and not ocr_text:
+            notes.append("asr_primary")
+        elif ocr_text and not transcript:
+            notes.append("ocr_primary")
+        if picture_words:
+            notes.append("picture_text_read")
+        if image is not None and not ocr_text and not picture_words:
+            notes.append("image_without_readable_text")

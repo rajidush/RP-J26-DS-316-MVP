@@ -118,6 +118,21 @@ class AnalystRunResult(BaseModel):
     protection_state: Literal["protected", "reviewing", "threat", "degraded"] = "protected"
     lexicon_hits: List[str] = Field(default_factory=list)
 
+    # --- Why the score is what it is (panel + audit trail) -------------------
+    # Split the two Stage-1 detectors so a reviewer can see which one fired.
+    lexicon_score: float = 0.0
+    model_score: Optional[float] = None
+    model_labels: Dict[str, float] = Field(default_factory=dict)
+    # Set when the framing guard reduced the score because the text reads as
+    # reporting/quoting harm rather than committing it. Never silent.
+    framing_reason: str = ""
+    score_before_framing: Optional[float] = None
+    # False while the image branch is uncalibrated: it is shown but excluded
+    # from the fused score (see stage2/fusion.py).
+    vision_calibrated: bool = False
+    fusion_mode: str = "idle"
+    escalated: bool = False
+
 
 CHILD_SAFE_SUMMARIES: Dict[str, str] = {
     "threat": "Someone in this chat is using language that sounds like a threat or harm.",

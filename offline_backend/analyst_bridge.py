@@ -52,6 +52,31 @@ def _source_from_row(row: Dict[str, Any]) -> Dict[str, bool]:
     }
 
 
+def persona_threshold_for_age(age: int) -> float:
+    """Mirror of analyst.decide.PERSONA_THETA2 — kept local so this bridge
+    stays import-free of the analyst package (and its ML deps)."""
+    if age <= 10:
+        return 0.55
+    if age <= 13:
+        return 0.65
+    return 0.75
+
+
+def _persona_threshold(row: Dict[str, Any]) -> float:
+    """The threshold the Analyst actually applied, straight from the emitted
+    envelope. Falls back to the age rule for rows written before the envelope
+    column existed."""
+    envelope = _parse_json(row.get("envelope_json")) or {}
+    payload = envelope.get("payload") or {}
+    try:
+        theta = float(payload.get("persona_threshold"))
+        if theta > 0:
+            return theta
+    except (TypeError, ValueError):
+        pass
+    return persona_threshold_for_age(int(row.get("child_age") or 10))
+
+
 def row_to_dashboard_run(row: Dict[str, Any]) -> Dict[str, Any]:
     category = row.get("category") or "none"
     if category == "none" and row.get("decision") == "hate":
@@ -71,11 +96,38 @@ def row_to_dashboard_run(row: Dict[str, Any]) -> Dict[str, Any]:
         "session_hint": row.get("app_exe") or "unknown",
         "app_exe": row.get("app_exe") or "unknown",
         "child_safe_summary": row.get("child_safe_summary") or "",
+        "recommended_action": row.get("recommended_action") or "",
+        "persona_threshold": _persona_threshold(row),
     }
 
 
 def db_available() -> bool:
     return ANALYST_DB.is_file()
+
+
+# Everything the dashboard and the C3 trigger need. `envelope_json` and
+# `recommended_action` arrived in later migrations, so the select is built from
+# whatever the file on disk actually has — never assume the newest schema.
+_WANTED_COLUMNS = (
+    "id",
+    "ts",
+    "decision",
+    "category",
+    "score",
+    "child_age",
+    "ocr_snippet",
+    "transcript_snippet",
+    "app_exe",
+    "modalities_json",
+    "child_safe_summary",
+    "recommended_action",
+    "envelope_json",
+)
+
+
+def _available_columns(conn: sqlite3.Connection) -> List[str]:
+    present = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    return [c for c in _WANTED_COLUMNS if c in present]
 
 
 def list_runs(limit: int = 100) -> List[Dict[str, Any]]:
@@ -86,10 +138,11 @@ def list_runs(limit: int = 100) -> List[Dict[str, Any]]:
         conn = sqlite3.connect(f"file:{ANALYST_DB}?mode=ro", uri=True, timeout=2.0)
         conn.row_factory = sqlite3.Row
         try:
+            cols = _available_columns(conn)
+            if not cols:
+                return []
             cur = conn.execute(
-                "SELECT id, ts, decision, category, score, child_age, "
-                "ocr_snippet, transcript_snippet, app_exe, modalities_json, child_safe_summary "
-                "FROM runs ORDER BY ts DESC LIMIT ?",
+                f"SELECT {', '.join(cols)} FROM runs ORDER BY ts DESC LIMIT ?",
                 (limit,),
             )
             return [row_to_dashboard_run(dict(r)) for r in cur.fetchall()]
@@ -174,6 +227,70 @@ def hate_speech_score_from_latest(run: Optional[Dict[str, Any]] = None) -> float
         return float(row.get("risk_score") or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def get_run(run_id: str) -> Optional[Dict[str, Any]]:
+    """One run by id — so C3 acts on the exact detection the UI saw, not on
+    whatever happens to be newest by the time the request lands."""
+    if not run_id or not db_available():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{ANALYST_DB}?mode=ro", uri=True, timeout=2.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            cols = _available_columns(conn)
+            if not cols:
+                return None
+            cur = conn.execute(
+                f"SELECT {', '.join(cols)} FROM runs WHERE id = ? LIMIT 1",
+                (run_id,),
+            )
+            row = cur.fetchone()
+            return row_to_dashboard_run(dict(row)) if row else None
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def hate_verdict(run: Optional[Dict[str, Any]] = None, run_id: str = "") -> Dict[str, Any]:
+    """The Analyst's own verdict, for C3 to act on.
+
+    C2 has already applied the age persona threshold (0.55 / 0.65 / 0.75) when
+    it emitted `hate.detected`, so `detected` here is simply that decision.
+    Consumers must NOT re-threshold the score: a second fixed cut-off silently
+    discards every detection between the persona threshold and that cut-off,
+    which is exactly the band the youngest child is protected by.
+    """
+    row = run
+    if row is None:
+        row = get_run(run_id) if run_id else latest_run()
+    if not row:
+        return {
+            "detected": False,
+            "score": 0.0,
+            "category": "none",
+            "persona_threshold": 0.0,
+            "child_safe_summary": "",
+            "recommended_action": "",
+            "run_id": "",
+            "child_age": 0,
+        }
+    detected = row.get("decision") == "hate"
+    try:
+        score = float(row.get("risk_score") or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return {
+        "detected": detected,
+        "score": score if detected else 0.0,
+        "category": (row.get("category") or "none") if detected else "none",
+        "persona_threshold": float(row.get("persona_threshold") or 0.0),
+        "child_safe_summary": row.get("child_safe_summary") or "",
+        "recommended_action": row.get("recommended_action") or "",
+        "run_id": row.get("id") or "",
+        "child_age": int(row.get("child_age") or 0),
+    }
 
 
 def get_merged_analyst_runs(limit: int = 100) -> Dict[str, Any]:

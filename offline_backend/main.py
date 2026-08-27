@@ -37,6 +37,26 @@ from guard import ZeroTrustGuard
 guard_system = ZeroTrustGuard()
 guard_system.start()
 
+# Only for the simulated slider path (demo presets). Real C2 detections are
+# NOT scored against this — see trigger_threat().
+SIMULATED_HATE_THRESHOLD = 0.80
+
+# C2 emits fine categories; C3's prompts read the type as prose
+# ("...detected material that looks like {threat_type}"). Map so the dialogue
+# is framed as the thing that actually happened, and keep hate_identity on the
+# existing "hate_speech" wording the Socratic prompts were tuned against.
+ANALYST_CATEGORY_TO_THREAT_TYPE = {
+    "hate_identity": "hate_speech",
+    "bullying": "cyberbullying",
+    "threat": "threats",
+    "sexual_harassment": "sexual_harassment",
+    "profanity": "strong_language",
+}
+
+
+def analyst_category_to_threat_type(category: str) -> str:
+    return ANALYST_CATEGORY_TO_THREAT_TYPE.get(category or "", "hate_speech")
+
 # --- Schemas ---
 
 class GuardToggleRequest(BaseModel):
@@ -56,6 +76,14 @@ class ThreatTriggerRequest(BaseModel):
     hate_speech_score: float = Field(0.0, description="Hate speech score")
     adult_content_score: float = Field(0.0, description="Adult content score")
     child_age: int = Field(10, description="The age of the child using the computer (e.g. 8 or 14)")
+    analyst_run_id: Optional[str] = Field(
+        None,
+        description=(
+            "Id of a C2 Analyst run. When present this is a real detection: the "
+            "Analyst's own hate/not-hate decision is trusted as-is. When absent, "
+            "hate_speech_score is treated as a simulated slider value."
+        ),
+    )
 
 class ThreatTriggerResponse(BaseModel):
     threat_detected: bool = Field(..., description="Flag indicating if safety threshold was breached.")
@@ -64,6 +92,13 @@ class ThreatTriggerResponse(BaseModel):
     initial_response: str = Field(..., description="First age-specific Socratic intervention question.")
     child_age: int
     current_phase: str
+    # C2 contract passthrough (Engineering Plan §4.7). Additive — existing
+    # clients that ignore these keep working.
+    source: str = Field("simulation", description="'analyst' for a real C2 detection, else 'simulation'.")
+    risk_score: float = Field(0.0, description="Risk score behind the interception.")
+    analyst_category: str = Field("none", description="Fine-grained C2 category, e.g. bullying / threat.")
+    persona_threshold: float = Field(0.0, description="Age threshold C2 applied when deciding.")
+    child_safe_summary: str = Field("", description="C2 summary safe to show a child (never raw hate text).")
 
 class DialogueTurnRequest(BaseModel):
     session_id: str = Field(..., description="UUID representing the active dialogue session.")
@@ -92,37 +127,60 @@ def read_root():
 @app.post("/api/perception/trigger", response_model=ThreatTriggerResponse)
 def trigger_threat(payload: ThreatTriggerRequest):
     """
-    Simulates the 'Perception Layer' interceptor.
-    Analyzes content threat scores against individual safety thresholds.
+    The 'Perception Layer' interceptor.
+
+    Simulated slider scores are compared against fixed thresholds:
     - nsfw / adult content score > 0.80
     - violence_score > 0.80
-    - hate_speech_score > 0.80 (also filled from live C2 Analyst if client sends 0)
+    - hate_speech_score > 0.80
     - weapons_score > 0.75
+
+    Hate speech is different when it comes from the live C2 Analyst (client
+    sends `analyst_run_id`, or sends no hate score at all): the Analyst has
+    already decided against the child's age persona threshold, so its
+    `decision` is trusted and no second threshold is applied here.
     """
     threat_detected = False
     threat_type = "none"
+    risk_score = 0.0
 
-    # Prefer client score; if unset, pull live C2 Analyst hate reading (safe no-op if offline)
-    hate_score = float(payload.hate_speech_score or 0.0)
-    if hate_score <= 0.0:
+    # --- Hate speech: the Analyst owns this verdict --------------------------
+    # C2 already applied the age persona threshold (0.55 / 0.65 / 0.75) before
+    # emitting hate.detected. Re-thresholding its score here at 0.80 silently
+    # discarded every detection in between — e.g. a bullying poster scoring
+    # 0.64 is a real alert for a 10-year-old and was being dropped. So when the
+    # reading comes from the Analyst we trust `decision`, and the fixed cut-off
+    # now applies only to the simulated slider path.
+    client_hate = float(payload.hate_speech_score or 0.0)
+    verdict = None
+    if payload.analyst_run_id or client_hate <= 0.0:
         try:
-            hate_score = float(analyst_bridge.hate_speech_score_from_latest() or 0.0)
+            verdict = analyst_bridge.hate_verdict(run_id=payload.analyst_run_id or "")
         except Exception:
-            hate_score = 0.0
+            verdict = None
+
+    from_analyst = bool(verdict and verdict.get("detected"))
+    hate_score = float(verdict["score"]) if from_analyst else client_hate
 
     nsfw_val = max(payload.nsfw_score, payload.adult_content_score)
     if nsfw_val > 0.80:
         threat_detected = True
         threat_type = "adult_content"
+        risk_score = nsfw_val
     elif payload.violence_score > 0.80:
         threat_detected = True
         threat_type = "violence"
-    elif hate_score > 0.80:
+        risk_score = payload.violence_score
+    elif from_analyst or hate_score > SIMULATED_HATE_THRESHOLD:
         threat_detected = True
-        threat_type = "hate_speech"
+        threat_type = (
+            analyst_category_to_threat_type(verdict["category"]) if from_analyst else "hate_speech"
+        )
+        risk_score = hate_score
     elif payload.weapons_score > 0.75:
         threat_detected = True
         threat_type = "weapons"
+        risk_score = payload.weapons_score
 
     # Safety Threshold Gate
     if not threat_detected:
@@ -182,7 +240,12 @@ def trigger_threat(payload: ThreatTriggerRequest):
         session_id=session_id,
         initial_response=initial_question,
         child_age=payload.child_age,
-        current_phase="Acknowledge"
+        current_phase="Acknowledge",
+        source="analyst" if from_analyst else "simulation",
+        risk_score=round(risk_score, 4),
+        analyst_category=verdict["category"] if from_analyst else "none",
+        persona_threshold=float(verdict["persona_threshold"]) if from_analyst else 0.0,
+        child_safe_summary=verdict["child_safe_summary"] if from_analyst else "",
     )
 
 @app.post("/api/dialogue/turn", response_model=DialogueTurnResponse)
