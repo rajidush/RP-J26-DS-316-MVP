@@ -6,158 +6,186 @@
 <title>Guardian Analyst — C2</title>
 <style>
 /* ---------------------------------------------------------------------------
-   Layout is a top-to-bottom narrative, because the audience is a review panel
-   watching once, not an operator who already knows the tool:
+   Security-console layout (ESET-style): a persistent left rail, one screen at
+   a time, and a single unambiguous protection state on Home.
 
-     1  status      is anything wrong right now
-     2  focus       where the engine looked and what it read   <- the demo
-     3  reasoning    why that produced this score
-     4  history + test
-     5  health
+   Why this shape suits the product: a parent or a review panel wants to answer
+   "is my child safe right now" in one glance, and only then drill into detail.
+   A long scrolling page forces them to read everything to find that out.
 
-   Every colour is paired with a word or an icon, so nothing depends on hue.
+   Tabs use real ARIA tab semantics with arrow-key navigation — the rail is the
+   primary control, so it has to work without a mouse.
 --------------------------------------------------------------------------- */
 :root{
-  --bg:#f6f7f9; --surface:#fff; --surface-2:#f2f4f7; --line:#e2e6ec; --line-2:#cfd6df;
-  --text:#141922; --muted:#5a6473; --faint:#8b95a4;
-  --accent:#2563eb; --accent-soft:#eaf1fe;
-  --ok:#0f7a4d; --ok-soft:#e6f6ee;
-  --warn:#8a5a00; --warn-soft:#fdf4e3;
-  --alert:#c0271c; --alert-soft:#fdedeb;
-  --r:12px; --r-sm:8px;
-  --shadow:0 1px 2px rgba(17,24,39,.05),0 4px 12px rgba(17,24,39,.05);
+  --bg:#eef1f5; --panel:#fff; --rail:#1e2733; --rail-2:#27313f;
+  --surface-2:#f3f5f8; --line:#e0e5ec; --line-2:#c9d2dd;
+  --text:#151b23; --muted:#5b6675; --faint:#8a94a2;
+  --accent:#2563eb; --accent-soft:#e8f0fe;
+  --ok:#118a54; --ok-soft:#e6f6ee;
+  --warn:#96610a; --warn-soft:#fdf3e2;
+  --alert:#c4271b; --alert-soft:#fdecea;
+  --r:10px; --r-sm:7px;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 2px 10px rgba(16,24,40,.05);
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0e1116; --surface:#161b22; --surface-2:#1d232c; --line:#2a313b; --line-2:#39424f;
-  --text:#e9edf3; --muted:#a4aebb; --faint:#79838f;
-  --accent:#63a0ff; --accent-soft:#152238;
-  --ok:#4ade80; --ok-soft:#0f2419;
-  --warn:#fbbf24; --warn-soft:#2a2110;
-  --alert:#ff7b6f; --alert-soft:#2d1512;
-  --shadow:0 1px 2px rgba(0,0,0,.45);
+  --bg:#0d1117; --panel:#161c24; --rail:#11161d; --rail-2:#1b222c;
+  --surface-2:#1d242e; --line:#2a323d; --line-2:#3a4453;
+  --text:#e8edf4; --muted:#a3aebc; --faint:#7a8492;
+  --accent:#67a3ff; --accent-soft:#16233a;
+  --ok:#43d18a; --ok-soft:#0f2a1d;
+  --warn:#f5b73d; --warn-soft:#2b2211;
+  --alert:#ff7f73; --alert-soft:#2e1613;
+  --shadow:0 1px 2px rgba(0,0,0,.5);
 }}
 :root[data-theme="dark"]{
-  --bg:#0e1116; --surface:#161b22; --surface-2:#1d232c; --line:#2a313b; --line-2:#39424f;
-  --text:#e9edf3; --muted:#a4aebb; --faint:#79838f;
-  --accent:#63a0ff; --accent-soft:#152238;
-  --ok:#4ade80; --ok-soft:#0f2419;
-  --warn:#fbbf24; --warn-soft:#2a2110;
-  --alert:#ff7b6f; --alert-soft:#2d1512;
-  --shadow:0 1px 2px rgba(0,0,0,.45);
+  --bg:#0d1117; --panel:#161c24; --rail:#11161d; --rail-2:#1b222c;
+  --surface-2:#1d242e; --line:#2a323d; --line-2:#3a4453;
+  --text:#e8edf4; --muted:#a3aebc; --faint:#7a8492;
+  --accent:#67a3ff; --accent-soft:#16233a;
+  --ok:#43d18a; --ok-soft:#0f2a1d;
+  --warn:#f5b73d; --warn-soft:#2b2211;
+  --alert:#ff7f73; --alert-soft:#2e1613;
+  --shadow:0 1px 2px rgba(0,0,0,.5);
 }
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
   font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   -webkit-font-smoothing:antialiased}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:5px}
-.skip{position:absolute;left:-9999px}
-.skip:focus{left:10px;top:10px;z-index:99;background:var(--surface);padding:9px 13px;border-radius:8px;box-shadow:var(--shadow)}
 h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.012em}
+.skip{position:absolute;left:-9999px}
+.skip:focus{left:10px;top:10px;z-index:99;background:var(--panel);padding:9px 13px;border-radius:8px}
 
-.wrap{max-width:1160px;margin:0 auto;padding:18px 20px 72px}
+/* ---- shell ---- */
+.app{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:100vh}
+@media (max-width:820px){.app{grid-template-columns:1fr}}
 
-/* header */
-.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
-  padding-bottom:16px;margin-bottom:18px;border-bottom:1px solid var(--line)}
-.brand{display:flex;align-items:center;gap:11px}
-.brand .mark{width:36px;height:36px;border-radius:10px;background:var(--accent);color:#fff;
+/* ---- left rail ---- */
+.rail{background:var(--rail);color:#e7ecf3;display:flex;flex-direction:column;padding:16px 0}
+.rail .brand{display:flex;gap:11px;align-items:center;padding:4px 18px 20px}
+.rail .mark{width:36px;height:36px;border-radius:9px;background:var(--accent);color:#fff;
   display:grid;place-items:center;font-weight:700;font-size:14px;flex:none}
-.brand h1{font-size:17px}
-.brand p{margin:2px 0 0;font-size:12.5px;color:var(--muted)}
+.rail .brand strong{display:block;font-size:14.5px;font-weight:600}
+.rail .brand span{display:block;font-size:11px;color:#8fa0b5;margin-top:1px}
+.rail nav{display:flex;flex-direction:column;gap:2px;padding:0 10px}
+.rail button.tab{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  background:transparent;border:0;color:#c3ccd8;font:inherit;font-size:13.5px;font-weight:500;
+  padding:10px 12px;border-radius:var(--r-sm);cursor:pointer;transition:background .12s}
+.rail button.tab:hover{background:var(--rail-2);color:#fff}
+.rail button.tab[aria-selected="true"]{background:var(--accent);color:#fff;font-weight:600}
+.rail .ic{width:18px;text-align:center;font-size:14px;flex:none}
+.rail .badge{margin-left:auto;font-size:10.5px;font-weight:700;background:var(--alert);
+  color:#fff;border-radius:99px;padding:1px 7px}
+.rail .foot{margin-top:auto;padding:14px 18px 0;font-size:11px;color:#7d8ea3;line-height:1.5}
+.rail .foot button{margin-top:9px;background:var(--rail-2);border:1px solid #33404f;color:#c3ccd8;
+  font:inherit;font-size:12px;padding:6px 11px;border-radius:6px;cursor:pointer}
+@media (max-width:820px){
+  .rail{flex-direction:column;align-items:stretch;padding:10px 12px;gap:9px}
+  .rail .brand{padding:0}
+  /* Horizontal, scrollable tab strip. Without width:auto the base rule's
+     width:100% makes every tab wrap onto its own line, which reproduces the
+     vertical rail in a space that has no room for it. */
+  .rail nav{flex-direction:row;flex-wrap:nowrap;padding:0;gap:5px;
+    overflow-x:auto;scrollbar-width:none}
+  .rail nav::-webkit-scrollbar{display:none}
+  .rail button.tab{width:auto;flex:none;padding:7px 12px;font-size:12.5px;white-space:nowrap}
+  .rail .foot{display:none}
+}
 
-/* section shell */
-.sec{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
-  box-shadow:var(--shadow);margin-bottom:18px;overflow:hidden}
-.sec > header{padding:15px 20px;border-bottom:1px solid var(--line);
-  display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.sec > header h2{font-size:15px}
-.sec > header p{margin:3px 0 0;font-size:12.5px;color:var(--muted);max-width:70ch}
-.sec .body{padding:18px 20px}
-.step{display:inline-grid;place-items:center;width:21px;height:21px;border-radius:50%;
-  background:var(--accent-soft);color:var(--accent);font-size:11.5px;font-weight:700;margin-right:8px}
+/* ---- content ---- */
+.content{padding:26px 30px 60px;min-width:0}
+@media (max-width:820px){.content{padding:18px 16px 48px}}
+.head{margin-bottom:20px}
+.head h1{font-size:20px}
+.head p{margin:4px 0 0;font-size:13px;color:var(--muted);max-width:74ch}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);margin-bottom:18px}
+.panel > h2{font-size:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.panel .in{padding:18px}
+[role=tabpanel][hidden]{display:none}
 
-/* status banner */
-.banner{display:flex;gap:15px;align-items:flex-start;border-radius:var(--r);padding:17px 20px;
-  border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);margin-bottom:18px}
-.banner .ico{font-size:22px;line-height:1;margin-top:1px}
-.banner h2{font-size:19px}
-.banner p{margin:4px 0 0;font-size:13.5px;color:var(--muted);max-width:66ch}
-.banner.ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
-.banner.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 36%,transparent)}
-.banner.alert{background:var(--alert-soft);border-color:color-mix(in srgb,var(--alert) 36%,transparent)}
+/* ---- home status ---- */
+.state{display:flex;gap:20px;align-items:center;padding:26px 24px;border-radius:var(--r);
+  border:1px solid var(--line);background:var(--panel);box-shadow:var(--shadow);margin-bottom:18px}
+.state .shield{width:64px;height:64px;border-radius:50%;flex:none;display:grid;place-items:center;
+  font-size:29px;background:var(--surface-2);color:var(--muted)}
+.state h2{font-size:22px}
+.state p{margin:5px 0 0;font-size:13.5px;color:var(--muted);max-width:64ch}
+.state.ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
+.state.ok .shield{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.state.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 34%,transparent)}
+.state.warn .shield{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.state.alert{background:var(--alert-soft);border-color:color-mix(in srgb,var(--alert) 34%,transparent)}
+.state.alert .shield{background:color-mix(in srgb,var(--alert) 16%,transparent);color:var(--alert)}
 
-/* ---- focus view: the demo centrepiece ---- */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:15px 17px;box-shadow:var(--shadow)}
+.card .k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);font-weight:600}
+.card .v{font-size:25px;font-weight:600;margin-top:5px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.card .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+
+/* ---- detection view ---- */
 .focus{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:20px}
-@media (max-width:900px){.focus{grid-template-columns:1fr}}
+@media (max-width:1000px){.focus{grid-template-columns:1fr}}
 .shotwrap{position:relative;line-height:0;border-radius:var(--r-sm);overflow:hidden;
   border:1px solid var(--line-2);background:var(--surface-2)}
 .shot{width:100%;display:block}
 .ov{position:absolute;border-radius:2px}
-.ov-q{border:1px solid color-mix(in srgb,var(--accent) 55%,transparent)}
-.ov-hit{border:2.5px solid var(--alert);background:color-mix(in srgb,var(--alert) 16%,transparent);
-  box-shadow:0 0 0 2px color-mix(in srgb,var(--alert) 22%,transparent)}
-.ov-pic{border:2px dashed var(--ok);background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.ov-q{border:1px solid color-mix(in srgb,var(--accent) 50%,transparent)}
+.ov-hit{border:2.5px solid var(--alert);background:color-mix(in srgb,var(--alert) 15%,transparent);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--alert) 20%,transparent)}
+.ov-pic{border:2px dashed var(--ok);background:color-mix(in srgb,var(--ok) 8%,transparent)}
 .ov-tag{position:absolute;top:-17px;left:-2px;font-size:10px;font-weight:700;line-height:1.5;
   padding:1px 5px;border-radius:4px;white-space:nowrap;background:var(--alert);color:#fff}
 .ov-pic .ov-tag{background:var(--ok)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:11px;font-size:12px;color:var(--muted)}
 .legend i{display:inline-block;width:16px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
-.lg-q{border:1px solid color-mix(in srgb,var(--accent) 55%,transparent)}
-.lg-hit{border:2px solid var(--alert);background:color-mix(in srgb,var(--alert) 16%,transparent)}
+.lg-q{border:1px solid color-mix(in srgb,var(--accent) 50%,transparent)}
+.lg-hit{border:2px solid var(--alert);background:color-mix(in srgb,var(--alert) 15%,transparent)}
 .lg-pic{border:2px dashed var(--ok)}
-
-/* read-out list beside the shot */
-.readout{min-width:0}
-.readout h3{font-size:13px;margin-bottom:3px}
-.readout .hint{font-size:12.5px;color:var(--muted);margin:0 0 11px}
-.rows{list-style:none;margin:0;padding:0;max-height:330px;overflow-y:auto;
+.rows{list-style:none;margin:0;padding:0;max-height:320px;overflow-y:auto;
   border:1px solid var(--line);border-radius:var(--r-sm)}
-.rows li{display:flex;gap:11px;align-items:baseline;padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px}
+.rows li{display:flex;gap:11px;align-items:baseline;padding:9px 12px;
+  border-bottom:1px solid var(--line);font-size:13px}
 .rows li:last-child{border-bottom:0}
 .rows li.hit{background:var(--alert-soft)}
-.rows .n{flex:none;width:20px;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
 .rows .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rows .s{flex:none;font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;color:var(--muted)}
 .rows li.hit .s{color:var(--alert)}
-.rows .why{font-size:11px;color:var(--alert);font-weight:600}
+.rows .why{flex:none;font-size:11px;color:var(--alert);font-weight:600}
 
-/* verdict / meter */
-.verdict{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
-.meter{margin:6px 0 4px}
+/* ---- meter + evidence ---- */
+.verdict{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:15px}
 .track{position:relative;height:12px;border-radius:99px;background:var(--surface-2);border:1px solid var(--line)}
 .fill{height:100%;border-radius:99px;background:var(--ok);transition:width .3s}
 .fill.warn{background:var(--warn)} .fill.alert{background:var(--alert)}
-.limit{position:absolute;top:-6px;bottom:-6px;width:2px;background:var(--text);opacity:.7}
+.limit{position:absolute;top:-6px;bottom:-6px;width:2px;background:var(--text);opacity:.65}
 .limit::after{content:attr(data-l);position:absolute;top:-18px;left:50%;transform:translateX(-50%);
   font-size:10.5px;font-weight:600;color:var(--muted);white-space:nowrap}
 .scale{display:flex;justify-content:space-between;font-size:11px;color:var(--faint);margin-top:6px}
-
-/* evidence bars */
 .eb{margin:11px 0}
 .eb .lab{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px}
-.eb .lab b{font-weight:600}
 .eb .lab span{font-variant-numeric:tabular-nums;color:var(--muted)}
 .eb .bar{height:8px;border-radius:99px;background:var(--surface-2);overflow:hidden}
 .eb .bar i{display:block;height:100%;border-radius:99px;background:var(--accent)}
 .eb.off .bar i{background:var(--faint)}
 .eb .why{font-size:11.5px;color:var(--faint);margin-top:4px}
 
-/* generic bits */
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-@media (max-width:900px){.grid2{grid-template-columns:1fr}}
+/* ---- shared bits ---- */
 label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:5px}
-input,select,textarea{font:inherit;color:var(--text);background:var(--surface);
+input,select,textarea{font:inherit;color:var(--text);background:var(--panel);
   border:1px solid var(--line-2);border-radius:var(--r-sm);padding:9px 11px;width:100%}
-textarea{resize:vertical;min-height:76px}
-button{font:inherit;font-weight:600;font-size:13.5px;border-radius:var(--r-sm);
-  border:1px solid var(--line-2);background:var(--surface);color:var(--text);padding:9px 16px;cursor:pointer}
-button:hover:not(:disabled){background:var(--surface-2)}
-button:disabled{opacity:.45;cursor:not-allowed}
-button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-button.primary:hover:not(:disabled){filter:brightness(1.08)}
-.row{display:flex;gap:11px;flex-wrap:wrap;align-items:flex-end}
+textarea{resize:vertical;min-height:80px}
+button.btn{font:inherit;font-weight:600;font-size:13.5px;border-radius:var(--r-sm);
+  border:1px solid var(--line-2);background:var(--panel);color:var(--text);padding:9px 17px;cursor:pointer}
+button.btn:hover:not(:disabled){background:var(--surface-2)}
+button.btn:disabled{opacity:.45;cursor:not-allowed}
+button.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.btn.primary:hover:not(:disabled){filter:brightness(1.08)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
 .pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;
   padding:4px 10px;border-radius:99px;background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
 .pill.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
@@ -168,10 +196,10 @@ button.primary:hover:not(:disabled){filter:brightness(1.08)}
   border-radius:0 var(--r-sm) var(--r-sm) 0;padding:10px 13px;font-size:13px;margin:10px 0;word-break:break-word}
 .quote b{display:block;font-size:10.5px;font-weight:700;color:var(--faint);
   text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
-.feed{list-style:none;margin:0;padding:0;max-height:300px;overflow-y:auto}
+.feed{list-style:none;margin:0;padding:0;max-height:520px;overflow-y:auto}
 .feed li{border-bottom:1px solid var(--line)} .feed li:last-child{border-bottom:0}
-.feed button{width:100%;text-align:left;border:0;background:transparent;padding:11px 10px;
-  display:flex;gap:11px;align-items:center;border-radius:var(--r-sm)}
+.feed button{width:100%;text-align:left;border:0;background:transparent;padding:12px 14px;
+  display:flex;gap:12px;align-items:center;cursor:pointer;font:inherit}
 .feed button:hover{background:var(--surface-2)}
 .feed button[aria-current="true"]{background:var(--accent-soft)}
 .feed .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none}
@@ -180,103 +208,86 @@ button.primary:hover:not(:disabled){filter:brightness(1.08)}
 .feed .b1{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .feed .b2{font-size:11.5px;color:var(--muted)}
 .feed .sc{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px}
-.hrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.hrow{display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:11px 0;border-bottom:1px solid var(--line);font-size:13.5px}
 .hrow:last-child{border-bottom:0}
-.empty{text-align:center;padding:40px 18px;color:var(--muted);font-size:13.5px}
-.empty .big{display:block;font-size:30px;opacity:.4;margin-bottom:9px}
-.err{background:var(--alert-soft);color:var(--alert);border-radius:var(--r-sm);padding:10px 13px;font-size:13px;margin-bottom:16px}
+.empty{text-align:center;padding:44px 18px;color:var(--muted);font-size:13.5px}
+.empty .big{display:block;font-size:32px;opacity:.35;margin-bottom:10px}
+.err{background:var(--alert-soft);color:var(--alert);border-radius:var(--r-sm);
+  padding:11px 14px;font-size:13px;margin-bottom:16px}
 .note{font-size:11.5px;color:var(--faint);margin-top:8px}
+.proto{font-size:11.5px;color:var(--muted);background:var(--surface-2);
+  border:1px dashed var(--line-2);border-radius:var(--r-sm);padding:9px 13px;margin-bottom:18px}
 .mono{font-family:var(--mono);font-size:11.5px}
-.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-.banner-note{font-size:11.5px;color:var(--muted);background:var(--surface-2);
-  border:1px dashed var(--line-2);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:18px}
 </style>
 </head>
 <body>
-<a class="skip" href="#main">Skip to main content</a>
-<div class="wrap">
+<a class="skip" href="#content">Skip to main content</a>
+<div class="app">
 
-<header class="top">
-  <div class="brand">
-    <div class="mark" aria-hidden="true">GA</div>
-    <div>
-      <h1>Guardian Analyst</h1>
-      <p>Component 2 · on-device hate-speech detection · nothing leaves this machine</p>
+  <!-- ---------------- left rail ---------------- -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">GA</div>
+      <div><strong>Guardian Analyst</strong><span>Component 2 · on-device</span></div>
     </div>
-  </div>
-  <div class="row" style="align-items:center">
-    <span id="backendPill" class="pill">checking…</span>
-    <button id="themeBtn" type="button">Theme</button>
-  </div>
-</header>
+    <nav role="tablist" aria-label="Sections" aria-orientation="vertical">
+      <button class="tab" role="tab" id="t-home"   aria-controls="p-home"   aria-selected="true"><span class="ic" aria-hidden="true">⌂</span>Home</button>
+      <button class="tab" role="tab" id="t-det"    aria-controls="p-det"    aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">◎</span>Detections<span id="detBadge" class="badge" hidden>0</span></button>
+      <button class="tab" role="tab" id="t-mon"    aria-controls="p-mon"    aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">▣</span>Monitoring</button>
+      <button class="tab" role="tab" id="t-test"   aria-controls="p-test"   aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">⌨</span>Test a message</button>
+      <button class="tab" role="tab" id="t-eng"    aria-controls="p-eng"    aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">⚙</span>Engine</button>
+    </nav>
+    <div class="foot">
+      Research prototype · J26-DS-316<br />Nothing leaves this machine.
+      <button id="themeBtn" type="button">Switch theme</button>
+    </div>
+  </aside>
 
-<p class="banner-note">Research prototype for J26-DS-316. Screenshots below are
-  deliberately blurred — the engine reads the frame in memory and erases it; only
-  scores and this blurred preview are kept.</p>
+  <!-- ---------------- content ---------------- -->
+  <main class="content" id="content">
+    <div id="err" class="err" role="alert" hidden></div>
 
-<div id="err" class="err" role="alert" hidden></div>
-
-<div id="banner" class="banner" role="status" aria-live="polite">
-  <span class="ico" aria-hidden="true">•</span>
-  <div><h2 id="bTitle">Starting…</h2><p id="bText">Checking the detection engine.</p></div>
-</div>
-
-<main id="main">
-
-  <!-- 1 ── FOCUS ---------------------------------------------------------- -->
-  <section class="sec" aria-labelledby="h-focus">
-    <header>
-      <div>
-        <h2 id="h-focus"><span class="step" aria-hidden="true">1</span>Where the engine looked</h2>
-        <p>Every region it read on screen, and which one triggered the alert.</p>
+    <!-- HOME -->
+    <section role="tabpanel" id="p-home" aria-labelledby="t-home">
+      <div class="head"><h1>Protection status</h1>
+        <p>What the engine is doing right now, and what it has found.</p></div>
+      <div id="state" class="state" role="status" aria-live="polite">
+        <div class="shield" aria-hidden="true">○</div>
+        <div><h2 id="sTitle">Starting…</h2><p id="sText">Checking the detection engine.</p></div>
       </div>
-      <span id="focusPill" class="pill">—</span>
-    </header>
-    <div class="body"><div id="focus"></div></div>
-  </section>
-
-  <!-- 2 ── REASONING ------------------------------------------------------ -->
-  <section class="sec" aria-labelledby="h-why">
-    <header>
-      <div>
-        <h2 id="h-why"><span class="step" aria-hidden="true">2</span>Why it decided that</h2>
-        <p>Each check that ran, what it scored, and how that compares to this child's age limit.</p>
-      </div>
-    </header>
-    <div class="body"><div id="why"></div></div>
-  </section>
-
-  <!-- 3 ── HISTORY + TEST ------------------------------------------------- -->
-  <div class="grid2">
-    <section class="sec" aria-labelledby="h-feed">
-      <header>
-        <div><h2 id="h-feed"><span class="step" aria-hidden="true">3</span>Recent checks</h2>
-          <p>Newest first. Select one to load it above.</p></div>
-        <span id="statsPill" class="pill">—</span>
-      </header>
-      <div class="body" style="padding:6px 12px"><ul id="feed" class="feed" aria-label="Recent checks"></ul></div>
+      <div class="cards" id="cards"></div>
+      <div class="panel"><h2>Most recent check</h2><div class="in" id="homeLatest"></div></div>
     </section>
 
-    <section class="sec" aria-labelledby="h-try">
-      <header><div><h2 id="h-try"><span class="step" aria-hidden="true">4</span>Try it</h2>
-        <p>Type a message or upload a screenshot to see the engine work.</p></div></header>
-      <div class="body">
-        <label for="manualText">Message text</label>
-        <textarea id="manualText" placeholder="e.g. gg ez noob"></textarea>
-        <div class="row" style="margin-top:11px">
-          <div style="flex:1;min-width:140px">
-            <label for="fImage">Screenshot</label>
-            <input id="fImage" type="file" accept="image/*" />
-          </div>
-          <div style="flex:1;min-width:140px">
-            <label for="fAudio">Voice clip</label>
-            <input id="fAudio" type="file" accept="audio/*" />
-          </div>
-          <button id="btnAnalyze" class="primary" type="button">Check it</button>
-        </div>
-        <hr style="border:0;border-top:1px solid var(--line);margin:18px 0" />
+    <!-- DETECTIONS -->
+    <section role="tabpanel" id="p-det" aria-labelledby="t-det" hidden>
+      <div class="head"><h1>Detections</h1>
+        <p>Where the engine looked on screen, what it read there, and why that produced this score.</p></div>
+      <p class="proto">The screenshot is deliberately blurred — the engine reads the frame in memory
+        and erases it. Only scores and this blurred preview are kept, so the words appear in the list
+        beside the image rather than in the picture.</p>
+      <div class="panel">
+        <h2>Where the engine looked</h2>
+        <div class="in" id="focus"></div>
+      </div>
+      <div class="panel">
+        <h2>Why it decided that</h2>
+        <div class="in" id="why"></div>
+      </div>
+      <div class="panel">
+        <h2>Earlier checks</h2>
+        <ul id="feed" class="feed" aria-label="Recent checks"></ul>
+      </div>
+    </section>
+
+    <!-- MONITORING -->
+    <section role="tabpanel" id="p-mon" aria-labelledby="t-mon" hidden>
+      <div class="head"><h1>Monitoring</h1>
+        <p>Check the screen and speaker audio on a timer. Frames are analysed in memory and erased.</p></div>
+      <div class="panel"><h2>Controls</h2><div class="in">
         <div class="row">
-          <div style="flex:1;min-width:150px">
+          <div style="flex:1;min-width:190px">
             <label for="age">Child's age</label>
             <select id="age">
               <option value="9">8–10 years (most protective)</option>
@@ -284,29 +295,60 @@ button.primary:hover:not(:disabled){filter:brightness(1.08)}
               <option value="15">14–15 years</option>
             </select>
           </div>
-          <div style="width:135px">
+          <div style="width:160px">
             <label for="interval">Check every</label>
             <select id="interval">
-              <option value="2.5">2.5 seconds</option>
-              <option value="10">10 seconds</option>
               <option value="30" selected>30 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="2.5">2.5 seconds</option>
             </select>
           </div>
-          <button id="btnStart" class="primary" type="button">Start monitoring</button>
-          <button id="btnStop" type="button" disabled>Stop</button>
+          <button id="btnStart" class="btn primary" type="button">Start monitoring</button>
+          <button id="btnStop" class="btn" type="button" disabled>Stop</button>
         </div>
         <p class="note" id="sensNote"></p>
-      </div>
+        <p class="note" id="speedNote"></p>
+      </div></div>
+      <div class="panel"><h2>Privacy</h2><div class="in">
+        <div class="hrow"><span>Raw screen frames and audio</span><span class="pill ok">never written to disk</span></div>
+        <div class="hrow"><span>Blurred preview image</span><span class="pill">deleted after 24 hours</span></div>
+        <div class="hrow"><span>Scores and short text snippets</span><span class="pill">deleted after 30 days</span></div>
+        <div class="hrow"><span>Network access during analysis</span><span class="pill ok">none</span></div>
+      </div></div>
     </section>
-  </div>
 
-  <!-- 4 ── HEALTH --------------------------------------------------------- -->
-  <section class="sec" aria-labelledby="h-health">
-    <header><div><h2 id="h-health"><span class="step" aria-hidden="true">5</span>Engine status</h2>
-      <p>Which parts are running on this machine.</p></div></header>
-    <div class="body"><div id="health"></div></div>
-  </section>
-</main>
+    <!-- TEST -->
+    <section role="tabpanel" id="p-test" aria-labelledby="t-test" hidden>
+      <div class="head"><h1>Test a message</h1>
+        <p>Type a message or upload a screenshot to watch the engine work, without monitoring anything.</p></div>
+      <div class="panel"><h2>Input</h2><div class="in">
+        <label for="manualText">Message text</label>
+        <textarea id="manualText" placeholder="e.g. gg ez noob"></textarea>
+        <div class="row" style="margin-top:12px">
+          <div style="flex:1;min-width:150px"><label for="fImage">Screenshot</label>
+            <input id="fImage" type="file" accept="image/*" /></div>
+          <div style="flex:1;min-width:150px"><label for="fAudio">Voice clip</label>
+            <input id="fAudio" type="file" accept="audio/*" /></div>
+          <button id="btnAnalyze" class="btn primary" type="button">Check it</button>
+        </div>
+        <p class="note">The result opens in Detections, with the reasoning behind it.</p>
+      </div></div>
+      <div class="panel"><h2>Suggested examples</h2><div class="in" id="examples"></div></div>
+    </section>
+
+    <!-- ENGINE -->
+    <section role="tabpanel" id="p-eng" aria-labelledby="t-eng" hidden>
+      <div class="head"><h1>Engine</h1>
+        <p>Which parts are running on this machine, and how the decision limits are set.</p></div>
+      <div class="panel"><h2>Components</h2><div class="in" id="health"></div></div>
+      <div class="panel"><h2>Age limits</h2><div class="in">
+        <div class="hrow"><span>8–10 years</span><span class="pill">alert at 0.55</span></div>
+        <div class="hrow"><span>11–13 years</span><span class="pill">alert at 0.65</span></div>
+        <div class="hrow"><span>14–15 years</span><span class="pill">alert at 0.75</span></div>
+        <p class="note">A younger child uses a lower limit, so more content is flagged for review.</p>
+      </div></div>
+    </section>
+  </main>
 </div>
 
 <script>
@@ -321,6 +363,36 @@ let runs = [], selected = null, timer = null;
 async function api(p, o) { const r = await fetch(p, o); if (!r.ok) throw new Error(`${p} → ${r.status}`); return r.json(); }
 function showErr(m) { const e = $("err"); if (!m) { e.hidden = true; return; } e.hidden = false; e.textContent = m; }
 
+/* ---------- tabs (real ARIA, arrow-key navigable) ---------- */
+const TABS = ["home", "det", "mon", "test", "eng"];
+function show(name) {
+  TABS.forEach(n => {
+    const t = $("t-" + n), p = $("p-" + n), on = n === name;
+    t.setAttribute("aria-selected", String(on));
+    t.tabIndex = on ? 0 : -1;
+    p.hidden = !on;
+  });
+  try { localStorage.setItem("ga-tab", name); } catch (_) {}
+}
+TABS.forEach((n, i) => {
+  const t = $("t-" + n);
+  t.onclick = () => show(n);
+  t.onkeydown = e => {
+    const k = e.key;
+    if (k !== "ArrowDown" && k !== "ArrowUp" && k !== "ArrowRight" && k !== "ArrowLeft"
+        && k !== "Home" && k !== "End") return;
+    e.preventDefault();
+    let j = i;
+    if (k === "ArrowDown" || k === "ArrowRight") j = (i + 1) % TABS.length;
+    else if (k === "ArrowUp" || k === "ArrowLeft") j = (i - 1 + TABS.length) % TABS.length;
+    else if (k === "Home") j = 0; else j = TABS.length - 1;
+    show(TABS[j]); $("t-" + TABS[j]).focus();
+  };
+});
+(function () {
+  let s = null; try { s = localStorage.getItem("ga-tab"); } catch (_) {}
+  show(TABS.includes(s) ? s : "home");
+})();
 (function () {
   let s = null; try { s = localStorage.getItem("ga-theme"); } catch (_) {}
   if (s) document.documentElement.setAttribute("data-theme", s);
@@ -333,52 +405,64 @@ function showErr(m) { const e = $("err"); if (!m) { e.hidden = true; return; } e
   };
 })();
 
-/* ---------- status ---------- */
+/* ---------- home ---------- */
 const STATES = {
-  threat:   ["alert", "▲", "Something needs your attention",
-             "The latest check found language that may be harmful. The details are below."],
-  guarding: ["ok", "●", "Monitoring is on",
+  threat:   ["alert", "!", "Attention needed",
+             "The most recent check found language that may be harmful. Open Detections to see exactly what and where."],
+  guarding: ["ok", "✓", "You are protected",
              "The screen and speaker audio are being checked. Nothing harmful found so far."],
-  reviewing:["warn", "◆", "Looked closely at something",
+  reviewing:["warn", "◆", "Reviewed, nothing raised",
              "A check scored near this child's limit but stayed under it. No alert was raised."],
-  degraded: ["warn", "◆", "Running with reduced capability",
-             "Part of the engine is unavailable, so some content may not be checked."],
+  degraded: ["warn", "◆", "Reduced capability",
+             "Part of the engine is unavailable, so some content may not be checked. See Engine."],
   idle:     ["", "○", "Monitoring is off",
-             "Press Start monitoring, or use Try it to test a message or screenshot."]
+             "Start monitoring to check the screen, or use Test a message to try the engine."]
 };
-function setBanner(state) {
-  const [cls, ico, t, p] = STATES[state] || STATES.idle;
-  $("banner").className = "banner " + cls;
-  $("banner").querySelector(".ico").textContent = ico;
-  $("bTitle").textContent = t; $("bText").textContent = p;
+function renderHome(st) {
+  const [cls, ico, t, p] = STATES[st.protection] || STATES[st.capturing ? "guarding" : "idle"];
+  $("state").className = "state " + cls;
+  $("state").querySelector(".shield").textContent = ico;
+  $("sTitle").textContent = t; $("sText").textContent = p;
+
+  const s = st.stats || {}, tf = (st.backends || {}).text_fast || "";
+  $("cards").innerHTML = [
+    ["Checks run", s.total || 0, st.capturing ? "monitoring is on" : "monitoring is off"],
+    ["Alerts raised", s.hate || 0, "content that reached the age limit"],
+    ["Detection models", tf.includes("hf:") ? "Loaded" : "Rules only",
+      tf.includes("hf:") ? "rules + two language models" : "language models not installed"],
+    ["Child's age", ($("age") || {}).value || "9", "limit " + num(LIMITS[($("age") || {}).value || 9])]
+  ].map(([k, v, sub]) => `<div class="card"><div class="k">${esc(k)}</div>
+      <div class="v">${esc(String(v))}</div><div class="s">${esc(sub)}</div></div>`).join("");
+
+  const r = runs[0];
+  $("homeLatest").innerHTML = r ? `
+    <div class="verdict">
+      ${r.decision === "hate" ? `<span class="pill alert">Alert · ${esc(r.category || "harm")}</span>`
+        : `<span class="pill ok">Cleared</span>`}
+      <span class="pill">${esc(r.app_exe || "unknown")}</span>
+      <span class="pill">${esc((r.ts || "").slice(11, 19))}</span>
+      <span class="pill">score ${num(r.score)}</span></div>
+    ${r.child_safe_summary ? `<div class="quote"><b>What the child would be told</b>${esc(r.child_safe_summary)}</div>` : ""}
+    <button class="btn" type="button" onclick="document.getElementById('t-det').click()">Open in Detections</button>`
+    : `<div class="empty"><span class="big" aria-hidden="true">◔</span>No checks yet.</div>`;
 }
 
-/* ---------- 1. focus view ----------
-   The screenshot is unreadable by design, so the boxes carry the meaning and
-   the list beside it carries the words. Regions that matched nothing are drawn
-   as thin outlines — present, but not competing with the one that fired.      */
+/* ---------- detections ---------- */
 function renderFocus(run) {
   const box = $("focus");
-  if (!run) {
-    box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">▣</span>
-      Run a check to see where the engine looked.</div>`;
-    $("focusPill").textContent = "—"; return;
-  }
+  if (!run) { box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">▣</span>
+    Run a check to see where the engine looked.</div>`; return; }
   const dets = ((run.evidence || {}).detections) || [];
   const text = dets.filter(d => d.kind !== "picture");
-  const hits = text.filter(d => Number(d.score) >= 0.5);
-  $("focusPill").textContent = `${text.length} regions · ${hits.length} matched`;
 
   if (!run.thumb_data_url) {
     box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">⌨</span>
-      This check was text only — there was no screen image to mark up.</div>`;
+      This was a text-only check — there was no screen image to mark up.</div>`;
     return;
   }
-
   const shapes = dets.filter(d => Array.isArray(d.box) && d.box.length === 4).map(d => {
     const [x0, y0, x1, y1] = d.box;
-    const pic = d.kind === "picture";
-    const hot = !pic && Number(d.score) >= 0.5;
+    const pic = d.kind === "picture", hot = !pic && Number(d.score) >= 0.5;
     const tag = pic ? "picture → vision model"
       : (hot ? `${esc((d.hits || [])[0] || d.category || "rule")} ${num(d.score)}` : "");
     return `<div class="ov ${pic ? "ov-pic" : (hot ? "ov-hit" : "ov-q")}"
@@ -386,119 +470,93 @@ function renderFocus(run) {
       title="${esc(d.text || "")}">${tag ? `<span class="ov-tag">${tag}</span>` : ""}</div>`;
   }).join("");
 
-  /* A full desktop OCR pass returns 40+ lines, most of them UI fragments like
-     "=" or a stray glyph. Listing them in capture order buries the one line
-     that actually matched. So: drop 1-character noise, rank by score, and
-     collapse the quiet tail into a single count. */
-  const meaningful = text
-    .filter(d => (d.text || "").trim().length > 1)
+  /* A desktop OCR pass returns 40+ lines, mostly UI fragments. Rank by score so
+     the line that fired is first, and collapse the quiet tail to a count. */
+  const meaningful = text.filter(d => (d.text || "").trim().length > 1)
     .sort((a, b) => Number(b.score) - Number(a.score));
-  const TOP = 10;
-  const head = meaningful.slice(0, TOP);
-  const restCount = text.length - head.length;
-
+  const head = meaningful.slice(0, 10), rest = text.length - head.length;
   const rows = head.length ? head.map(d => {
     const hot = Number(d.score) >= 0.5;
-    return `<li class="${hot ? "hit" : ""}">
-      <span class="t" title="${esc(d.text || "")}">${esc(d.text)}</span>
+    return `<li class="${hot ? "hit" : ""}"><span class="t" title="${esc(d.text)}">${esc(d.text)}</span>
       ${hot ? `<span class="why">${esc((d.hits || [])[0] || d.category || "")}</span>` : ""}
       <span class="s">${num(d.score)}</span></li>`;
-  }).join("") + (restCount > 0
-      ? `<li><span class="t" style="color:var(--faint)">+ ${restCount} more region${restCount === 1 ? "" : "s"} read, nothing matched</span></li>`
-      : "")
+  }).join("") + (rest > 0 ? `<li><span class="t" style="color:var(--faint)">+ ${rest} more region${rest === 1 ? "" : "s"} read, nothing matched</span></li>` : "")
     : `<li><span class="t" style="color:var(--muted)">No readable text in this frame.</span></li>`;
 
   box.innerHTML = `<div class="focus">
     <div>
-      <div class="shotwrap">
-        <img class="shot" src="${run.thumb_data_url}"
-             alt="Blurred screen preview with the regions the engine read marked" />
-        ${shapes}
-      </div>
+      <div class="shotwrap"><img class="shot" src="${run.thumb_data_url}"
+        alt="Blurred screen preview with the regions the engine read marked" />${shapes}</div>
       <div class="legend">
         <span><i class="lg-q"></i>read, matched nothing</span>
         <span><i class="lg-hit"></i>matched a word rule</span>
         <span><i class="lg-pic"></i>sent to the vision model</span>
       </div>
-      <p class="note">Blurred and shrunk on purpose — the original frame was erased from memory.</p>
     </div>
-    <div class="readout">
-      <h3>What it read</h3>
-      <p class="hint">Highest-scoring regions first, with the score the word rules gave each one.</p>
+    <div>
+      <h3 style="font-size:13px">What it read</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin:3px 0 11px">Highest-scoring regions first.</p>
       <ul class="rows">${rows}</ul>
       ${(run.image_caption || "").trim() ? `<div class="quote"><b>Vision model described the picture as</b>${esc(run.image_caption)}</div>` : ""}
       ${(run.transcript_snippet || "").trim() ? `<div class="quote"><b>Speech heard</b>${esc(run.transcript_snippet)}</div>` : ""}
-    </div>
-  </div>`;
+    </div></div>`;
 }
 
-/* ---------- 2. reasoning ---------- */
 function renderWhy(run) {
   const box = $("why");
   if (!run) { box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">◎</span>
-    Select a check to see the reasoning behind its score.</div>`; return; }
-
-  const ev = run.evidence || {}, s1 = run.stage1 || {}, s2 = run.stage2 || {}, lat = run.latency_ms || {};
+    Select a check to see the reasoning.</div>`; return; }
+  const ev = run.evidence || {}, s1 = run.stage1 || {}, lat = run.latency_ms || {};
   const age = Number(run.child_age) || 10;
   const limit = age <= 10 ? 0.55 : (age <= 13 ? 0.65 : 0.75);
   const score = Number(run.score) || 0, isHate = run.decision === "hate";
-
-  const verdict = isHate ? `<span class="pill alert">▲ Alert · ${esc(run.category || "harm")}</span>`
-    : (ev.escalated ? `<span class="pill warn">◆ Looked closely · under the limit</span>`
-                    : `<span class="pill ok">● Cleared at first check</span>`);
-
   const lex = Number(ev.lexicon_score ?? s1.lexicon_score ?? 0);
   const mod = ev.model_score == null ? null : Number(ev.model_score);
   const vis = Number(s1.vision_score ?? 0);
   const labels = ev.model_labels || {};
   const shown = Object.keys(labels).slice(0, 3).map(k => `${esc(k.replace(/_/g, " "))} ${num(labels[k])}`).join(" · ");
 
-  let bars = ebar("Word & phrase rules", lex, lex >= 0.5 ? "Matched a known harmful phrase." : "No harmful phrase matched.");
+  let bars = ebar("Word & phrase rules", lex, lex >= .5 ? "Matched a known harmful phrase." : "No harmful phrase matched.");
   if (mod != null) bars += ebar("Language model", mod,
-    (mod >= 0.5 ? "Judged this language harmful." : "Did not judge this harmful.") + (shown ? " · " + shown : ""));
-  else if (lex >= 0.88) bars += ebarOff("Language model", "not run",
+    (mod >= .5 ? "Judged this language harmful." : "Did not judge this harmful.") + (shown ? " · " + shown : ""));
+  else if (lex >= .88) bars += ebarOff("Language model", "not run",
     "Skipped — the word rules already matched at full confidence, so it could not change the result.");
-  if (vis > 0) bars += ebar("Picture check", vis, ev.vision_calibrated
-    ? "Counted towards the score." : "Shown only — this branch is not validated, so it cannot change the result.",
-    !ev.vision_calibrated);
-
-  const framing = ev.framing_reason ? `<div class="quote"><b>Score was reduced</b>
-    This reads as someone <strong>reporting or quoting</strong> harm rather than committing it
-    ${ev.score_before_framing != null ? `— lowered from ${num(ev.score_before_framing)} to ${num(score)}.` : "."}
-    A child asking for help should never trigger an alert.</div>` : "";
+  if (vis > 0) bars += ebar("Picture check", vis, ev.vision_calibrated ? "Counted towards the score."
+    : "Shown only — not validated yet, so it cannot change the result.", !ev.vision_calibrated);
 
   const cls = score >= limit ? "alert" : (score >= limit * .7 ? "warn" : "");
   box.innerHTML = `
-    <div class="verdict">${verdict}
+    <div class="verdict">
+      ${isHate ? `<span class="pill alert">Alert · ${esc(run.category || "harm")}</span>`
+        : (ev.escalated ? `<span class="pill warn">Checked closely · under the limit</span>`
+                        : `<span class="pill ok">Cleared at first check</span>`)}
       <span class="pill">${esc(run.app_exe || "unknown")}</span>
-      <span class="pill">${esc((run.ts || "").slice(11, 19))}</span>
       <span class="pill">${num(lat.total_ms, 0)} ms</span></div>
-    <div class="meter"><div class="track" role="img"
-        aria-label="Risk ${num(score)} of 1. Limit for this age is ${num(limit)}.">
-        <div class="fill ${cls}" style="width:${pct(score)}%"></div>
-        <div class="limit" style="left:${pct(limit)}%" data-l="limit ${num(limit)}"></div></div>
-      <div class="scale"><span>0.00 no risk</span><span>1.00 certain</span></div></div>
-    <p style="font-size:13.5px;margin:12px 0 0">Scored <strong>${num(score)}</strong>;
+    <div class="track" role="img" aria-label="Risk ${num(score)} of 1. Limit ${num(limit)}.">
+      <div class="fill ${cls}" style="width:${pct(score)}%"></div>
+      <div class="limit" style="left:${pct(limit)}%" data-l="limit ${num(limit)}"></div></div>
+    <div class="scale"><span>0.00 no risk</span><span>1.00 certain</span></div>
+    <p style="font-size:13.5px;margin:14px 0 0">Scored <strong>${num(score)}</strong>;
       the limit for a ${age}-year-old is <strong>${num(limit)}</strong>.
-      ${isHate ? "It reached the limit, so an alert was raised."
-               : "It stayed under the limit, so no alert was raised."}</p>
+      ${isHate ? "It reached the limit, so an alert was raised." : "It stayed under the limit, so no alert was raised."}</p>
     ${run.child_safe_summary ? `<div class="quote"><b>What the child would be told</b>${esc(run.child_safe_summary)}</div>` : ""}
-    ${framing}
+    ${ev.framing_reason ? `<div class="quote"><b>Score was reduced</b>This reads as someone
+      <strong>reporting or quoting</strong> harm rather than committing it${ev.score_before_framing != null
+        ? ` — lowered from ${num(ev.score_before_framing)} to ${num(score)}.` : "."}
+      A child asking for help should never trigger an alert.</div>` : ""}
     <div style="margin-top:16px">${bars}</div>
     ${(run.lexicon_hits || []).length ? `<p class="note">Rules matched:
       ${run.lexicon_hits.map(h => `<code class="mono">${esc(h)}</code>`).join(", ")}</p>` : ""}`;
 }
-function ebar(name, v, why, off) {
-  return `<div class="eb ${off ? "off" : ""}"><div class="lab"><b>${esc(name)}</b><span>${num(v)}</span></div>
-    <div class="bar"><i style="width:${pct(v)}%"></i></div>
-    ${why ? `<div class="why">${esc(why)}</div>` : ""}</div>`;
+function ebar(n, v, why, off) {
+  return `<div class="eb ${off ? "off" : ""}"><div class="lab"><b>${esc(n)}</b><span>${num(v)}</span></div>
+    <div class="bar"><i style="width:${pct(v)}%"></i></div>${why ? `<div class="why">${esc(why)}</div>` : ""}</div>`;
 }
-function ebarOff(name, label, why) {
-  return `<div class="eb off"><div class="lab"><b>${esc(name)}</b><span>${esc(label)}</span></div>
+function ebarOff(n, label, why) {
+  return `<div class="eb off"><div class="lab"><b>${esc(n)}</b><span>${esc(label)}</span></div>
     <div class="bar"><i style="width:0%"></i></div><div class="why">${esc(why)}</div></div>`;
 }
 
-/* ---------- 3. feed ---------- */
 function renderFeed() {
   const f = $("feed");
   if (!runs.length) { f.innerHTML = `<li><div class="empty"><span class="big" aria-hidden="true">◔</span>
@@ -516,7 +574,7 @@ function renderFeed() {
   f.querySelectorAll("button").forEach(b => b.onclick = () => { selected = b.dataset.id; paint(); });
 }
 
-/* ---------- 5. health ---------- */
+/* ---------- engine ---------- */
 const NAMES = { ocr:"Reading text on screen", asr:"Understanding speech",
   text_fast:"Judging language (first check)", text_full:"Re-reading long text (second check)",
   image_fast:"Judging pictures", clip:"Understanding images", vision_meaning:"Describing pictures (memes)" };
@@ -526,14 +584,28 @@ function renderHealth(st) {
     const v = String(b[k] ?? "none");
     const off = v === "none" || v === "deferred" || v.endsWith("_failed");
     const uncal = v.includes("uncalibrated");
-    const cls = off ? "warn" : (uncal ? "info" : "ok");
-    const word = off ? "not installed" : (uncal ? "shown, not counted" : "working");
     return `<div class="hrow"><span>${esc(NAMES[k])}</span>
-      <span class="pill ${cls}" title="${esc(v)}">${word}</span></div>`;
+      <span class="pill ${off ? "warn" : (uncal ? "info" : "ok")}" title="${esc(v)}">
+        ${off ? "not installed" : (uncal ? "shown, not counted" : "working")}</span></div>`;
   }).join("") + (st && st.last_error ? `<p class="note" style="color:var(--warn)">${esc(st.last_error)}</p>` : "")
     + `<p class="note">“Shown, not counted” means a check runs and is displayed as evidence,
        but is not allowed to change the score until it has been validated.</p>`;
 }
+
+/* ---------- examples ---------- */
+const EXAMPLES = [
+  ["you should kys nobody likes you", "direct abuse — expect an alert"],
+  ["gg ez noob that was a fun match", "gaming banter — expect no alert"],
+  ["miss he keeps calling me a retard what do i do", "a child reporting abuse — expect no alert"],
+  ["they breed like vermin and take our jobs", "implicit hate with no slur"]
+];
+$("examples").innerHTML = EXAMPLES.map(([t, why]) =>
+  `<div class="hrow"><span><code class="mono">${esc(t)}</code><br />
+     <span style="font-size:11.5px;color:var(--faint)">${esc(why)}</span></span>
+   <button class="btn" type="button" data-ex="${esc(t)}">Use</button></div>`).join("");
+$("examples").querySelectorAll("button[data-ex]").forEach(b => b.onclick = () => {
+  $("manualText").value = b.dataset.ex; $("manualText").focus();
+});
 
 /* ---------- refresh ---------- */
 function paint() {
@@ -547,24 +619,28 @@ async function refresh() {
     const [st, rd] = await Promise.all([api("/api/status"), api("/api/runs?limit=40")]);
     showErr("");
     $("btnStart").disabled = !!st.capturing; $("btnStop").disabled = !st.capturing;
-    setBanner(st.protection || (st.capturing ? "guarding" : "idle"));
-    const s = st.stats || {};
-    $("statsPill").textContent = `${s.total || 0} checked · ${s.hate || 0} flagged`;
-    const tf = (st.backends || {}).text_fast || "";
-    $("backendPill").textContent = tf.includes("hf:") ? "Models loaded" : "Rules only";
-    $("backendPill").className = "pill " + (tf.includes("hf:") ? "ok" : "warn");
     runs = rd.runs || [];
-    renderHealth(st); paint();
+    const alerts = (st.stats || {}).hate || 0;
+    $("detBadge").hidden = !alerts; $("detBadge").textContent = alerts;
+    renderHome(st); renderHealth(st); paint();
   } catch (e) {
     showErr("Cannot reach the Analyst service. Is `python -m analyst.serve` still running?");
-    setBanner("degraded");
+    renderHome({ protection: "degraded", stats: {}, backends: {} });
   }
 }
 
 /* ---------- actions ---------- */
-$("age").onchange = () => { $("sensNote").textContent =
-  `An alert is raised at ${num(LIMITS[$("age").value])} or above. Younger ages use a lower limit, so more is flagged.`; };
-$("age").onchange();
+$("age").onchange = () => {
+  $("sensNote").textContent =
+    `An alert is raised at ${num(LIMITS[$("age").value])} or above. Younger ages use a lower limit, so more is flagged.`;
+};
+$("interval").onchange = () => {
+  const v = Number($("interval").value);
+  $("speedNote").textContent = v < 20
+    ? "Note: a full-screen check takes roughly 7 seconds, longer with the meme reader on. Overlapping checks are skipped, so the real rate will be slower than this setting."
+    : "";
+};
+$("age").onchange(); $("interval").onchange();
 $("btnStart").onclick = async () => {
   try { await api("/api/capture/start", { method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({ age:Number($("age").value), interval_s:Number($("interval").value) }) }); refresh(); }
@@ -586,8 +662,7 @@ $("btnAnalyze").onclick = async () => {
     const r = await fetch("/api/analyze", { method:"POST", body: fd });
     if (!r.ok) throw new Error("status " + r.status);
     const d = await r.json();
-    showErr(""); selected = d.run_id; await refresh();
-    $("focus").scrollIntoView({ behavior:"smooth", block:"start" });
+    showErr(""); selected = d.run_id; await refresh(); show("det");
   } catch (e) { showErr("Could not check that: " + e.message); }
   finally { btn.disabled = false; btn.textContent = "Check it"; }
 };
