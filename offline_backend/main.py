@@ -157,7 +157,7 @@ def trigger_threat(payload: ThreatTriggerRequest):
     import json
     initial_payload = {
         "socratic_response_to_child": initial_question,
-        "child_emotion": "neutral",
+        "child_emotion": "Neutral",
         "agreed_to_boundary": False
     }
     session_state["history"].append({
@@ -170,7 +170,7 @@ def trigger_threat(payload: ThreatTriggerRequest):
         session_id=session_id,
         child_response="",
         socratic_response_to_child=initial_question,
-        child_emotion="neutral",
+        child_emotion="Neutral",
         agreed_to_boundary=False,
         current_phase="Acknowledge",
         completed=False
@@ -185,6 +185,17 @@ def trigger_threat(payload: ThreatTriggerRequest):
         current_phase="Acknowledge"
     )
 
+def map_emotion(raw_emotion: str) -> str:
+    if not raw_emotion:
+        return "Neutral"
+    emo = raw_emotion.lower().strip()
+    if emo in ["resolved", "compliant", "happy", "reflective", "curious", "positive"]:
+        return "Positive"
+    elif emo in ["scared", "defensive", "frustrated", "angry", "negative"]:
+        return "Negative"
+    else:
+        return "Neutral"
+
 @app.post("/api/dialogue/turn", response_model=DialogueTurnResponse)
 def execute_dialogue_turn(payload: DialogueTurnRequest):
     """
@@ -196,14 +207,14 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
         raise HTTPException(status_code=404, detail="Socratic safety session not found or expired.")
 
     if session["completed"]:
-        last_emotion = "neutral"
+        last_emotion = "Neutral"
         data = dashboard_store.get_dashboard_data()
         for s in data.get("socratic_sessions", []):
             if s.get("session_id") == payload.session_id:
                 turns = s.get("turns", [])
                 for turn in reversed(turns):
                     if turn.get("child_emotion"):
-                        last_emotion = turn["child_emotion"]
+                        last_emotion = map_emotion(turn["child_emotion"])
                         break
                 break
         return DialogueTurnResponse(
@@ -219,11 +230,12 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
             session_id=payload.session_id,
             child_response=payload.child_response
         )
+        mapped_emotion = map_emotion(result["child_emotion"])
         dashboard_store.add_socratic_turn(
             session_id=payload.session_id,
             child_response=payload.child_response,
             socratic_response_to_child=result["socratic_response_to_child"],
-            child_emotion=result["child_emotion"],
+            child_emotion=mapped_emotion,
             agreed_to_boundary=result["agreed_to_boundary"],
             current_phase=result["state_info"]["next_phase"],
             completed=result["state_info"]["completed"]
@@ -233,7 +245,7 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
 
     return DialogueTurnResponse(
         socratic_response_to_child=result["socratic_response_to_child"],
-        child_emotion=result["child_emotion"],
+        child_emotion=mapped_emotion,
         agreed_to_boundary=result["agreed_to_boundary"],
         current_phase=result["state_info"]["next_phase"],
         completed=result["state_info"]["completed"]
