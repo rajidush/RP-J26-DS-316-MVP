@@ -131,7 +131,17 @@ def api_whitebox() -> dict:
 
 @app.get("/api/status")
 def api_status() -> dict:
-    return worker.status()
+    from analyst.store import persist as _persist
+
+    st = worker.status()
+    # The panel must be able to say whether it is showing a privacy-preserving
+    # preview or a sharp demo capture. Leaving that ambiguous is how a reviewer
+    # ends up believing the wrong thing about what the database holds.
+    st["preview"] = {
+        "blurred": _persist.previews_are_blurred(),
+        "width": _persist.THUMB_WIDTH,
+    }
+    return st
 
 
 @app.post("/api/capture/start")

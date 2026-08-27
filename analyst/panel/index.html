@@ -264,9 +264,7 @@ button.btn.primary:hover:not(:disabled){filter:brightness(1.08)}
     <section role="tabpanel" id="p-det" aria-labelledby="t-det" hidden>
       <div class="head"><h1>Detections</h1>
         <p>Where the engine looked on screen, what it read there, and why that produced this score.</p></div>
-      <p class="proto">The screenshot is deliberately blurred — the engine reads the frame in memory
-        and erases it. Only scores and this blurred preview are kept, so the words appear in the list
-        beside the image rather than in the picture.</p>
+      <p class="proto" id="previewNote"></p>
       <div class="panel">
         <h2>Where the engine looked</h2>
         <div class="in" id="focus"></div>
@@ -607,6 +605,23 @@ $("examples").querySelectorAll("button[data-ex]").forEach(b => b.onclick = () =>
   $("manualText").value = b.dataset.ex; $("manualText").focus();
 });
 
+/* A reviewer must never have to guess whether they are looking at a
+   privacy-preserving preview or a sharp demo capture — the two imply very
+   different things about what the database holds. */
+function renderPreviewNote(p) {
+  const el = $("previewNote");
+  if (p.blurred === false) {
+    el.innerHTML = `<strong style="color:var(--warn)">Demo mode — previews are not blurred.</strong>
+      Screenshots are stored at ${esc(String(p.width || "?"))} px and are readable, so this database
+      should be treated as sensitive. Restart without <code class="mono">ANALYST_THUMB_BLUR=0</code>
+      to return to blurred previews. Raw frames are still never written to disk.`;
+  } else {
+    el.innerHTML = `The screenshot is deliberately blurred — the engine reads the frame in memory
+      and erases it. Only scores and this blurred preview are kept, so the words appear in the list
+      beside the image rather than in the picture.`;
+  }
+}
+
 /* ---------- refresh ---------- */
 function paint() {
   renderFeed();
@@ -622,6 +637,7 @@ async function refresh() {
     runs = rd.runs || [];
     const alerts = (st.stats || {}).hate || 0;
     $("detBadge").hidden = !alerts; $("detBadge").textContent = alerts;
+    renderPreviewNote(st.preview || {});
     renderHome(st); renderHealth(st); paint();
   } catch (e) {
     showErr("Cannot reach the Analyst service. Is `python -m analyst.serve` still running?");

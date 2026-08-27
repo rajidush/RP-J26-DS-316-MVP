@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 from typing import Optional
 
@@ -31,23 +32,48 @@ def redact_snippet(text: str, limit: int = 200) -> str:
     return out[:limit]
 
 
-def make_blurred_thumb(frame_bytes: Optional[bytes], max_w: int = 320) -> Optional[bytes]:
-    """Privacy-safe preview: small + blurred JPEG. Never stores full frame."""
+# Preview policy. The defaults are the privacy-preserving ones and should stay
+# that way: a 320 px blurred JPEG shows *where* the engine looked without
+# storing anything readable from a child's screen.
+#
+# Demo mode (ANALYST_THUMB_BLUR=0) writes a sharp, larger preview so a reviewer
+# can actually read the screen behind the detection boxes. That is a real
+# weakening — the database then holds legible screenshots — so it is opt-in,
+# never the default, and the panel labels any run captured under it.
+THUMB_WIDTH = int(os.environ.get("ANALYST_THUMB_WIDTH", "320"))
+THUMB_BLUR = float(os.environ.get("ANALYST_THUMB_BLUR", "8"))
+
+
+def previews_are_blurred() -> bool:
+    return THUMB_BLUR > 0
+
+
+def make_blurred_thumb(
+    frame_bytes: Optional[bytes],
+    max_w: Optional[int] = None,
+) -> Optional[bytes]:
+    """Preview image for the panel. Never stores the full frame."""
     if not frame_bytes:
         return None
+    width = max_w or THUMB_WIDTH
     try:
         img = Image.open(io.BytesIO(frame_bytes)).convert("RGB")
         w, h = img.size
-        if w > max_w:
-            nh = max(1, int(h * (max_w / w)))
-            img = img.resize((max_w, nh), Image.Resampling.BILINEAR)
-        img = img.filter(ImageFilter.GaussianBlur(radius=8))
+        if w > width:
+            nh = max(1, int(h * (width / w)))
+            img = img.resize((width, nh), Image.Resampling.BILINEAR)
+        if THUMB_BLUR > 0:
+            img = img.filter(ImageFilter.GaussianBlur(radius=THUMB_BLUR))
+        # A sharp preview only earns its size if the text is legible, so give
+        # demo mode more quality and a proportionally larger ceiling.
+        quality = 45 if THUMB_BLUR > 0 else 72
+        ceiling = 48_000 if THUMB_BLUR > 0 else 220_000
         out = io.BytesIO()
-        img.save(out, format="JPEG", quality=45, optimize=True)
+        img.save(out, format="JPEG", quality=quality, optimize=True)
         data = out.getvalue()
-        if len(data) > 48_000:
+        if len(data) > ceiling:
             out = io.BytesIO()
-            img.save(out, format="JPEG", quality=30, optimize=True)
+            img.save(out, format="JPEG", quality=max(30, quality - 20), optimize=True)
             data = out.getvalue()
         return data
     except Exception:
