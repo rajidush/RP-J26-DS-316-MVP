@@ -155,6 +155,72 @@ class AnalystPipeline:
         latency["extract_ms"] = round((time.perf_counter() - t_extract) * 1000, 1)
         return ocr_text, transcript, ocr_regions
 
+    def _score_picture(self, image, frame_emb, ocr_text: str, notes: list):
+        """Vision channel, scored on the picture rather than the whole desktop.
+
+        The trained probe learns from Hateful Memes, where every sample *is* a
+        picture. Handing it a full desktop screenshot is out of distribution,
+        and measurably so: a clean gaming chat window scored 0.4961 — past the
+        0.35 stage-1 gate — before this crop was introduced. Scoring the same
+        region `region.py` already isolates keeps the input in the distribution
+        the probe was fitted on, and no picture means no score at all.
+
+        Zero-shot keeps the whole-frame embedding, since it is excluded from
+        the fused score anyway and only shown as evidence.
+        """
+        if image is None:
+            return 0.0, None
+        if not getattr(self.image_fast, "_probe", None):
+            try:
+                return self.image_fast.score(embedding=frame_emb, image=image), None
+            except Exception as exc:
+                notes.append(f"image_fast_failed:{type(exc).__name__}")
+                return 0.0, None
+
+        from .extract.region import crop_to_region
+
+        try:
+            crop, _box = crop_to_region(image)
+        except Exception:
+            crop = None
+        if crop is None:
+            notes.append("meme_probe_no_picture")
+            return 0.0, None
+
+        try:
+            crop_emb = self.embed.embed(crop)
+        except Exception as exc:
+            notes.append(f"crop_embed_failed:{type(exc).__name__}")
+            return 0.0, None
+        if not crop_emb:
+            return 0.0, None
+
+        # A multimodal probe judges the picture *together with* the words on it.
+        # The caption analogue at inference is the OCR text, embedded with the
+        # same CLIP text tower the probe was trained against.
+        caption_emb = None
+        if self.image_fast.needs_text_embedding and ocr_text.strip():
+            try:
+                vecs = self.embed.embed_texts([ocr_text[:300]])
+                caption_emb = vecs[0] if vecs else None
+            except Exception as exc:
+                notes.append(f"caption_embed_failed:{type(exc).__name__}")
+
+        try:
+            score = self.image_fast.score(
+                embedding=crop_emb, image=crop, text_embedding=caption_emb
+            )
+        except Exception as exc:
+            notes.append(f"image_fast_failed:{type(exc).__name__}")
+            return 0.0, caption_emb
+
+        if getattr(self.image_fast, "_abstained_no_text", False):
+            notes.append("meme_probe_abstained_no_text")
+            self.image_fast._abstained_no_text = False
+        else:
+            notes.append("meme_probe_scored_crop")
+        return score, caption_emb
+
     @staticmethod
     def _mark_regions(regions: list, reading, image) -> list:
         """Attach a per-region risk so the panel can colour the overlay.
@@ -289,11 +355,7 @@ class AnalystPipeline:
             emb = []
         latency["clip_ms"] = round((time.perf_counter() - t_clip) * 1000, 1)
 
-        try:
-            vision_score = self.image_fast.score(embedding=emb, image=image)
-        except Exception as exc:
-            notes.append(f"image_fast_failed:{type(exc).__name__}")
-            vision_score = 0.0
+        vision_score, caption_emb = self._score_picture(image, emb, ocr_text, notes)
         vision_calibrated = bool(getattr(self.image_fast, "calibrated", False))
         latency["stage1_ms"] = round((time.perf_counter() - t_s1) * 1000, 1)
 

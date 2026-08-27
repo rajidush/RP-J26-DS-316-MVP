@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
@@ -63,11 +64,29 @@ PROBE_PATH = Path(__file__).resolve().parents[1] / "models" / "image_probe.json"
 def _load_probe() -> Optional[dict]:
     """Load the trained probe, but only if it earned its place.
 
-    `meets_bar` is written by the training script and reflects held-out AUC.
-    A probe that missed the bar is kept on disk for the record and deliberately
-    not loaded: letting an under-performing vision score into fusion is exactly
-    what cleared confirmed threats for ages 14-15 before.
+    Two gates, and they check different things.
+
+    `meets_bar` is written by the training script from held-out ROC AUC on
+    Facebook Hateful Memes. The current probe passes it (0.6579 vs a 0.65 bar
+    set before training).
+
+    The opt-in exists because passing that bar turned out **not to be
+    sufficient**. Measured in the live cascade afterwards:
+
+        clean gaming screenshot   vision 0.4961  -> escalated past the 0.35 gate
+        after cropping to the picture region     0.3292
+        the actual meme, same run                0.2960
+
+    Cropping fixed the escalation, but the ordering is still wrong — a benign
+    chat window outscored the meme. The probe is in-distribution for memes and
+    the pipeline feeds it every screenshot, so an AUC measured on memes does
+    not license it to move a child-safety decision on arbitrary desktop
+    content. It stays off until it is validated on that distribution.
+
+    Set ANALYST_MEME_PROBE=1 to enable it for a demo or an experiment.
     """
+    if os.environ.get("ANALYST_MEME_PROBE", "").strip() not in ("1", "true", "yes", "on"):
+        return None
     try:
         if not PROBE_PATH.is_file():
             return None
@@ -101,9 +120,11 @@ class ImageFast:
         # Zero-shot prompt banks are diagnostic evidence only — see docstring.
         self.calibrated = score_fn is not None
         self._probe = None if score_fn is not None else _load_probe()
+        self._abstained_no_text = False
         if self._probe is not None:
             self.calibrated = True
-            self.name = f"clip-probe(auc {self._probe['dev_auc']})"
+            mode = self._probe.get("mode", "image")
+            self.name = f"clip-probe:{mode}(auc {self._probe['dev_auc']})"
             return
         if self._override is not None:
             self.name = "injected"
@@ -127,6 +148,7 @@ class ImageFast:
         self,
         embedding: Optional[List[float]] = None,
         image: Optional[Image.Image] = None,
+        text_embedding: Optional[List[float]] = None,
     ) -> float:
         if self._override is not None:
             try:
@@ -145,7 +167,7 @@ class ImageFast:
         if not emb or self.embedder is None:
             return 0.0
         if self._probe is not None:
-            return self._probe_score(emb)
+            return self._probe_score(emb, text_embedding)
         if not (
             self.embedder.name.startswith("clip") or self.embedder.name == "clip:pending"
         ):
@@ -153,17 +175,39 @@ class ImageFast:
 
         return self._zero_shot(emb)
 
-    def _probe_score(self, image_emb: List[float]) -> float:
-        """Trained logistic probe over the CLIP embedding."""
+    def _probe_score(
+        self,
+        image_emb: List[float],
+        text_emb: Optional[List[float]] = None,
+    ) -> float:
+        """Trained logistic probe over the CLIP embedding(s).
+
+        A multimodal probe was trained on image+caption pairs, so it must be
+        given both. When there is no text on screen the caption half would be
+        a zero vector the probe never saw in training — out of distribution.
+        Rather than guess, it abstains (0.0), because that is exactly the
+        pure-visual case where a confident wrong answer would do the damage.
+        """
         probe = self._probe
-        if len(image_emb) != probe.get("dim"):
+        vector = list(image_emb)
+        if probe.get("mode") == "multimodal":
+            if not text_emb:
+                self._abstained_no_text = True
+                return 0.0
+            vector = vector + list(text_emb)
+        if len(vector) != probe.get("dim"):
             # Embedder changed under the probe; refuse rather than score noise.
             self.calibrated = False
             self.name = "clip-probe-dim-mismatch"
             self._probe = None
             return 0.0
-        z = _dot(image_emb, probe["coef"]) + probe["intercept"]
+        z = _dot(vector, probe["coef"]) + probe["intercept"]
         return round(_sigmoid(z), 4)
+
+    @property
+    def needs_text_embedding(self) -> bool:
+        """True when the loaded probe scores image+caption pairs."""
+        return bool(self._probe and self._probe.get("mode") == "multimodal")
 
     def _zero_shot(self, image_emb: List[float]) -> float:
         assert self.embedder is not None

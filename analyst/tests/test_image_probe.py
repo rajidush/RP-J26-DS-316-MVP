@@ -7,6 +7,7 @@ confirmed "you should kys" for ages 14-15.
 """
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -35,9 +36,16 @@ class ProbeAdmissionTests(unittest.TestCase):
         self.path = Path(self.tmp.name) / "image_probe.json"
         self._orig = mod.PROBE_PATH
         mod.PROBE_PATH = self.path
+        # The probe is opt-in in production; these tests exercise it directly.
+        self._orig_env = os.environ.get("ANALYST_MEME_PROBE")
+        os.environ["ANALYST_MEME_PROBE"] = "1"
 
     def tearDown(self):
         mod.PROBE_PATH = self._orig
+        if self._orig_env is None:
+            os.environ.pop("ANALYST_MEME_PROBE", None)
+        else:
+            os.environ["ANALYST_MEME_PROBE"] = self._orig_env
         self.tmp.cleanup()
 
     def _write(self, probe):
@@ -79,9 +87,16 @@ class ProbeScoringTests(unittest.TestCase):
         self.path = Path(self.tmp.name) / "image_probe.json"
         self._orig = mod.PROBE_PATH
         mod.PROBE_PATH = self.path
+        # The probe is opt-in in production; these tests exercise it directly.
+        self._orig_env = os.environ.get("ANALYST_MEME_PROBE")
+        os.environ["ANALYST_MEME_PROBE"] = "1"
 
     def tearDown(self):
         mod.PROBE_PATH = self._orig
+        if self._orig_env is None:
+            os.environ.pop("ANALYST_MEME_PROBE", None)
+        else:
+            os.environ["ANALYST_MEME_PROBE"] = self._orig_env
         self.tmp.cleanup()
 
     def _fast(self, probe):
