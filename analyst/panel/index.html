@@ -6,183 +6,190 @@
 <title>Guardian Analyst — C2</title>
 <style>
 /* ---------------------------------------------------------------------------
-   Design notes
-   - One accent hue; severity is carried by a dedicated scale so colour is
-     never the only signal (every state also has a label and an icon glyph).
-   - Contrast targets WCAG AA at minimum against both surfaces.
-   - Respects prefers-color-scheme and prefers-reduced-motion.
-   - System font stack: no webfont fetch, because the whole product is offline.
+   Layout is a top-to-bottom narrative, because the audience is a review panel
+   watching once, not an operator who already knows the tool:
+
+     1  status      is anything wrong right now
+     2  focus       where the engine looked and what it read   <- the demo
+     3  reasoning    why that produced this score
+     4  history + test
+     5  health
+
+   Every colour is paired with a word or an icon, so nothing depends on hue.
 --------------------------------------------------------------------------- */
-:root {
-  --bg:#f7f8fa; --surface:#ffffff; --surface-2:#f1f3f6; --line:#dde1e7;
-  --text:#1a1d23; --muted:#5b6472; --faint:#8892a0;
-  --accent:#1f6feb; --accent-soft:#e8f0fe;
-  --ok:#137a4b; --ok-soft:#e3f5ec;
-  --warn:#8a5a00; --warn-soft:#fdf3e0;
-  --alert:#b3261e; --alert-soft:#fdeceb;
-  --radius:10px; --radius-sm:6px;
-  --shadow:0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+:root{
+  --bg:#f6f7f9; --surface:#fff; --surface-2:#f2f4f7; --line:#e2e6ec; --line-2:#cfd6df;
+  --text:#141922; --muted:#5a6473; --faint:#8b95a4;
+  --accent:#2563eb; --accent-soft:#eaf1fe;
+  --ok:#0f7a4d; --ok-soft:#e6f6ee;
+  --warn:#8a5a00; --warn-soft:#fdf4e3;
+  --alert:#c0271c; --alert-soft:#fdedeb;
+  --r:12px; --r-sm:8px;
+  --shadow:0 1px 2px rgba(17,24,39,.05),0 4px 12px rgba(17,24,39,.05);
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg:#0f1216; --surface:#171b21; --surface-2:#1e232b; --line:#2b323c;
-    --text:#e8ecf1; --muted:#a3adbb; --faint:#7d8794;
-    --accent:#5b9dff; --accent-soft:#16233a;
-    --ok:#4ade80; --ok-soft:#10251a;
-    --warn:#fbbf24; --warn-soft:#2a2110;
-    --alert:#ff6b60; --alert-soft:#2e1512;
-    --shadow:0 1px 2px rgba(0,0,0,.4);
-  }
-}
-:root[data-theme="dark"] {
-  --bg:#0f1216; --surface:#171b21; --surface-2:#1e232b; --line:#2b323c;
-  --text:#e8ecf1; --muted:#a3adbb; --faint:#7d8794;
-  --accent:#5b9dff; --accent-soft:#16233a;
-  --ok:#4ade80; --ok-soft:#10251a;
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1116; --surface:#161b22; --surface-2:#1d232c; --line:#2a313b; --line-2:#39424f;
+  --text:#e9edf3; --muted:#a4aebb; --faint:#79838f;
+  --accent:#63a0ff; --accent-soft:#152238;
+  --ok:#4ade80; --ok-soft:#0f2419;
   --warn:#fbbf24; --warn-soft:#2a2110;
-  --alert:#ff6b60; --alert-soft:#2e1512;
-  --shadow:0 1px 2px rgba(0,0,0,.4);
+  --alert:#ff7b6f; --alert-soft:#2d1512;
+  --shadow:0 1px 2px rgba(0,0,0,.45);
+}}
+:root[data-theme="dark"]{
+  --bg:#0e1116; --surface:#161b22; --surface-2:#1d232c; --line:#2a313b; --line-2:#39424f;
+  --text:#e9edf3; --muted:#a4aebb; --faint:#79838f;
+  --accent:#63a0ff; --accent-soft:#152238;
+  --ok:#4ade80; --ok-soft:#0f2419;
+  --warn:#fbbf24; --warn-soft:#2a2110;
+  --alert:#ff7b6f; --alert-soft:#2d1512;
+  --shadow:0 1px 2px rgba(0,0,0,.45);
 }
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
   font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   -webkit-font-smoothing:antialiased}
-@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:5px}
 .skip{position:absolute;left:-9999px}
-.skip:focus{left:8px;top:8px;z-index:99;background:var(--surface);padding:8px 12px;border-radius:6px;box-shadow:var(--shadow)}
+.skip:focus{left:10px;top:10px;z-index:99;background:var(--surface);padding:9px 13px;border-radius:8px;box-shadow:var(--shadow)}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.012em}
 
-/* layout */
-.wrap{max-width:1240px;margin:0 auto;padding:20px 20px 64px}
-header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;
-  padding:14px 0 18px;border-bottom:1px solid var(--line);margin-bottom:20px}
-.brand{display:flex;align-items:center;gap:11px;min-width:0}
-.brand .mark{width:34px;height:34px;border-radius:9px;background:var(--accent);color:#fff;
-  display:grid;place-items:center;font-weight:700;font-size:15px;flex:none}
-.brand h1{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em}
-.brand p{margin:1px 0 0;font-size:12.5px;color:var(--muted)}
-.grid{display:grid;gap:16px;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}
-@media (max-width:1000px){.grid{grid-template-columns:1fr}}
+.wrap{max-width:1160px;margin:0 auto;padding:18px 20px 72px}
 
-.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-  box-shadow:var(--shadow);padding:16px 18px;margin-bottom:16px}
-.card h2{margin:0 0 3px;font-size:14px;font-weight:650;letter-spacing:-.005em}
-.card .sub{margin:0 0 14px;font-size:12.5px;color:var(--muted)}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.spread{display:flex;justify-content:space-between;align-items:center;gap:10px}
+/* header */
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
+  padding-bottom:16px;margin-bottom:18px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:11px}
+.brand .mark{width:36px;height:36px;border-radius:10px;background:var(--accent);color:#fff;
+  display:grid;place-items:center;font-weight:700;font-size:14px;flex:none}
+.brand h1{font-size:17px}
+.brand p{margin:2px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* section shell */
+.sec{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);margin-bottom:18px;overflow:hidden}
+.sec > header{padding:15px 20px;border-bottom:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.sec > header h2{font-size:15px}
+.sec > header p{margin:3px 0 0;font-size:12.5px;color:var(--muted);max-width:70ch}
+.sec .body{padding:18px 20px}
+.step{display:inline-grid;place-items:center;width:21px;height:21px;border-radius:50%;
+  background:var(--accent-soft);color:var(--accent);font-size:11.5px;font-weight:700;margin-right:8px}
 
 /* status banner */
-.status{display:flex;gap:14px;align-items:flex-start;border-radius:var(--radius);
-  padding:16px 18px;border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);margin-bottom:16px}
-.status .dot{width:12px;height:12px;border-radius:50%;margin-top:6px;flex:none;background:var(--faint)}
-.status h2{margin:0;font-size:19px;font-weight:650;letter-spacing:-.015em}
-.status p{margin:3px 0 0;font-size:13.5px;color:var(--muted);max-width:62ch}
-.status.is-ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 34%,transparent)}
-.status.is-ok .dot{background:var(--ok)}
-.status.is-warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
-.status.is-warn .dot{background:var(--warn)}
-.status.is-alert{background:var(--alert-soft);border-color:color-mix(in srgb,var(--alert) 40%,transparent)}
-.status.is-alert .dot{background:var(--alert)}
+.banner{display:flex;gap:15px;align-items:flex-start;border-radius:var(--r);padding:17px 20px;
+  border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow);margin-bottom:18px}
+.banner .ico{font-size:22px;line-height:1;margin-top:1px}
+.banner h2{font-size:19px}
+.banner p{margin:4px 0 0;font-size:13.5px;color:var(--muted);max-width:66ch}
+.banner.ok{background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
+.banner.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 36%,transparent)}
+.banner.alert{background:var(--alert-soft);border-color:color-mix(in srgb,var(--alert) 36%,transparent)}
 
-/* controls */
-label{font-size:12.5px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px}
+/* ---- focus view: the demo centrepiece ---- */
+.focus{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:20px}
+@media (max-width:900px){.focus{grid-template-columns:1fr}}
+.shotwrap{position:relative;line-height:0;border-radius:var(--r-sm);overflow:hidden;
+  border:1px solid var(--line-2);background:var(--surface-2)}
+.shot{width:100%;display:block}
+.ov{position:absolute;border-radius:2px}
+.ov-q{border:1px solid color-mix(in srgb,var(--accent) 55%,transparent)}
+.ov-hit{border:2.5px solid var(--alert);background:color-mix(in srgb,var(--alert) 16%,transparent);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--alert) 22%,transparent)}
+.ov-pic{border:2px dashed var(--ok);background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.ov-tag{position:absolute;top:-17px;left:-2px;font-size:10px;font-weight:700;line-height:1.5;
+  padding:1px 5px;border-radius:4px;white-space:nowrap;background:var(--alert);color:#fff}
+.ov-pic .ov-tag{background:var(--ok)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:11px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:16px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.lg-q{border:1px solid color-mix(in srgb,var(--accent) 55%,transparent)}
+.lg-hit{border:2px solid var(--alert);background:color-mix(in srgb,var(--alert) 16%,transparent)}
+.lg-pic{border:2px dashed var(--ok)}
+
+/* read-out list beside the shot */
+.readout{min-width:0}
+.readout h3{font-size:13px;margin-bottom:3px}
+.readout .hint{font-size:12.5px;color:var(--muted);margin:0 0 11px}
+.rows{list-style:none;margin:0;padding:0;max-height:330px;overflow-y:auto;
+  border:1px solid var(--line);border-radius:var(--r-sm)}
+.rows li{display:flex;gap:11px;align-items:baseline;padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px}
+.rows li:last-child{border-bottom:0}
+.rows li.hit{background:var(--alert-soft)}
+.rows .n{flex:none;width:20px;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.rows .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rows .s{flex:none;font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;color:var(--muted)}
+.rows li.hit .s{color:var(--alert)}
+.rows .why{font-size:11px;color:var(--alert);font-weight:600}
+
+/* verdict / meter */
+.verdict{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+.meter{margin:6px 0 4px}
+.track{position:relative;height:12px;border-radius:99px;background:var(--surface-2);border:1px solid var(--line)}
+.fill{height:100%;border-radius:99px;background:var(--ok);transition:width .3s}
+.fill.warn{background:var(--warn)} .fill.alert{background:var(--alert)}
+.limit{position:absolute;top:-6px;bottom:-6px;width:2px;background:var(--text);opacity:.7}
+.limit::after{content:attr(data-l);position:absolute;top:-18px;left:50%;transform:translateX(-50%);
+  font-size:10.5px;font-weight:600;color:var(--muted);white-space:nowrap}
+.scale{display:flex;justify-content:space-between;font-size:11px;color:var(--faint);margin-top:6px}
+
+/* evidence bars */
+.eb{margin:11px 0}
+.eb .lab{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px}
+.eb .lab b{font-weight:600}
+.eb .lab span{font-variant-numeric:tabular-nums;color:var(--muted)}
+.eb .bar{height:8px;border-radius:99px;background:var(--surface-2);overflow:hidden}
+.eb .bar i{display:block;height:100%;border-radius:99px;background:var(--accent)}
+.eb.off .bar i{background:var(--faint)}
+.eb .why{font-size:11.5px;color:var(--faint);margin-top:4px}
+
+/* generic bits */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:900px){.grid2{grid-template-columns:1fr}}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:5px}
 input,select,textarea{font:inherit;color:var(--text);background:var(--surface);
-  border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;width:100%}
-textarea{resize:vertical;min-height:74px}
-button{font:inherit;font-weight:600;font-size:13.5px;border-radius:var(--radius-sm);
-  border:1px solid var(--line);background:var(--surface);color:var(--text);
-  padding:8px 15px;cursor:pointer;transition:background .12s,border-color .12s}
+  border:1px solid var(--line-2);border-radius:var(--r-sm);padding:9px 11px;width:100%}
+textarea{resize:vertical;min-height:76px}
+button{font:inherit;font-weight:600;font-size:13.5px;border-radius:var(--r-sm);
+  border:1px solid var(--line-2);background:var(--surface);color:var(--text);padding:9px 16px;cursor:pointer}
 button:hover:not(:disabled){background:var(--surface-2)}
-button:disabled{opacity:.5;cursor:not-allowed}
+button:disabled{opacity:.45;cursor:not-allowed}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-button.primary:hover:not(:disabled){filter:brightness(1.07);background:var(--accent)}
-button.danger{color:var(--alert);border-color:color-mix(in srgb,var(--alert) 45%,var(--line))}
-
-/* pills / chips */
-.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:650;
-  padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted);
-  white-space:nowrap}
+button.primary:hover:not(:disabled){filter:brightness(1.08)}
+.row{display:flex;gap:11px;flex-wrap:wrap;align-items:flex-end}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;
+  padding:4px 10px;border-radius:99px;background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
 .pill.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
 .pill.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
 .pill.alert{background:var(--alert-soft);color:var(--alert);border-color:transparent}
 .pill.info{background:var(--accent-soft);color:var(--accent);border-color:transparent}
-
-/* score meter */
-.meter{margin:12px 0 4px}
-.meter .track{position:relative;height:10px;border-radius:999px;background:var(--surface-2);
-  border:1px solid var(--line);overflow:visible}
-.meter .fill{height:100%;border-radius:999px;background:var(--accent);transition:width .25s ease}
-.meter .fill.alert{background:var(--alert)} .meter .fill.warn{background:var(--warn)} .meter .fill.ok{background:var(--ok)}
-.meter .thresh{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--text);opacity:.65}
-.meter .thresh::after{content:attr(data-label);position:absolute;top:-19px;left:50%;transform:translateX(-50%);
-  font-size:10.5px;font-weight:650;color:var(--muted);white-space:nowrap}
-.meter .scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);margin-top:5px}
-
-/* evidence bars */
-.eb{margin:9px 0}
-.eb .lab{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px}
-.eb .lab .n{font-weight:600}
-.eb .lab .v{font-variant-numeric:tabular-nums;color:var(--muted)}
-.eb .bar{height:7px;border-radius:999px;background:var(--surface-2);overflow:hidden}
-.eb .bar i{display:block;height:100%;border-radius:999px;background:var(--accent)}
-.eb.muted .bar i{background:var(--faint)}
-.eb .why{font-size:11.5px;color:var(--faint);margin-top:3px}
-
-/* activity list */
-.feed{list-style:none;margin:0;padding:0;max-height:460px;overflow-y:auto}
-.feed li{border-bottom:1px solid var(--line)}
-.feed li:last-child{border-bottom:0}
-.feed button.item{width:100%;text-align:left;border:0;background:transparent;padding:11px 8px;
-  border-radius:var(--radius-sm);display:flex;gap:11px;align-items:center}
-.feed button.item:hover{background:var(--surface-2)}
-.feed button.item[aria-current="true"]{background:var(--accent-soft)}
-.feed .sev{width:9px;height:9px;border-radius:50%;flex:none;background:var(--ok)}
-.feed .sev.alert{background:var(--alert)} .feed .sev.warn{background:var(--warn)}
-.feed .body{min-width:0;flex:1}
-.feed .t1{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.feed .t2{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.feed .sc{font-variant-numeric:tabular-nums;font-size:13px;font-weight:650;flex:none}
-
-/* cascade trace */
-.trace{list-style:none;margin:6px 0 0;padding:0}
-.trace li{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px}
-.trace li:last-child{border-bottom:0}
-.trace .g{flex:none;width:15px;text-align:center;font-size:11px}
-.trace .nm{flex:1;min-width:0}
-.trace .dt{color:var(--muted);font-size:12px}
-.trace .ms{font-variant-numeric:tabular-nums;color:var(--faint);font-size:11.5px;flex:none}
-.g.ok{color:var(--ok)} .g.fail{color:var(--alert)} .g.skip{color:var(--faint)} .g.warn{color:var(--warn)}
-
-.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:12.5px;margin:0}
-.kv dt{color:var(--muted)} .kv dd{margin:0;font-variant-numeric:tabular-nums}
-.quote{background:var(--surface-2);border-left:3px solid var(--line);border-radius:0 var(--radius-sm) var(--radius-sm) 0;
-  padding:9px 12px;font-size:13px;margin:8px 0;word-break:break-word}
-.quote .src{display:block;font-size:11px;font-weight:650;color:var(--faint);text-transform:uppercase;
-  letter-spacing:.04em;margin-bottom:3px}
-.empty{text-align:center;padding:34px 16px;color:var(--muted);font-size:13.5px}
-.empty .big{font-size:30px;display:block;margin-bottom:8px;opacity:.5}
-.err{background:var(--alert-soft);color:var(--alert);border-radius:var(--radius-sm);padding:9px 12px;
-  font-size:13px;margin-bottom:12px}
-.thumb{width:100%;border-radius:var(--radius-sm);border:1px solid var(--line);display:block}
-
-/* detection overlay — boxes positioned in % so they scale with the image */
-.ovwrap{position:relative;display:block;line-height:0}
-.ov{position:absolute;border:1.5px solid;border-radius:2px;pointer-events:auto}
-.ov-txt{border-color:color-mix(in srgb,var(--accent) 70%,transparent);
-  background:color-mix(in srgb,var(--accent) 8%,transparent)}
-.ov-hot{border-color:var(--alert);background:color-mix(in srgb,var(--alert) 18%,transparent);
-  border-width:2px}
-.ov-pic{border-color:var(--ok);border-style:dashed;border-width:2px;
-  background:color-mix(in srgb,var(--ok) 8%,transparent)}
-.ov-tag{position:absolute;top:-15px;left:-1px;font-size:9.5px;font-weight:650;
-  line-height:1.35;padding:0 4px;border-radius:3px;white-space:nowrap;
-  background:var(--alert);color:#fff}
-.ov-pic .ov-tag{background:var(--ok)}
-.note{font-size:11.5px;color:var(--faint);margin-top:7px}
-.mono{font-family:var(--mono);font-size:12px}
-.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-hr.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
+.quote{background:var(--surface-2);border-left:3px solid var(--line-2);
+  border-radius:0 var(--r-sm) var(--r-sm) 0;padding:10px 13px;font-size:13px;margin:10px 0;word-break:break-word}
+.quote b{display:block;font-size:10.5px;font-weight:700;color:var(--faint);
+  text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.feed{list-style:none;margin:0;padding:0;max-height:300px;overflow-y:auto}
+.feed li{border-bottom:1px solid var(--line)} .feed li:last-child{border-bottom:0}
+.feed button{width:100%;text-align:left;border:0;background:transparent;padding:11px 10px;
+  display:flex;gap:11px;align-items:center;border-radius:var(--r-sm)}
+.feed button:hover{background:var(--surface-2)}
+.feed button[aria-current="true"]{background:var(--accent-soft)}
+.feed .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none}
+.feed .dot.alert{background:var(--alert)} .feed .dot.warn{background:var(--warn)}
+.feed .b{flex:1;min-width:0}
+.feed .b1{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed .b2{font-size:11.5px;color:var(--muted)}
+.feed .sc{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px}
+.hrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.hrow:last-child{border-bottom:0}
+.empty{text-align:center;padding:40px 18px;color:var(--muted);font-size:13.5px}
+.empty .big{display:block;font-size:30px;opacity:.4;margin-bottom:9px}
+.err{background:var(--alert-soft);color:var(--alert);border-radius:var(--r-sm);padding:10px 13px;font-size:13px;margin-bottom:16px}
+.note{font-size:11.5px;color:var(--faint);margin-top:8px}
+.mono{font-family:var(--mono);font-size:11.5px}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.banner-note{font-size:11.5px;color:var(--muted);background:var(--surface-2);
+  border:1px dashed var(--line-2);border-radius:var(--r-sm);padding:8px 12px;margin-bottom:18px}
 </style>
 </head>
 <body>
@@ -194,466 +201,397 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
     <div class="mark" aria-hidden="true">GA</div>
     <div>
       <h1>Guardian Analyst</h1>
-      <p>Component 2 &middot; on-device hate-speech detection &middot; nothing leaves this machine</p>
+      <p>Component 2 · on-device hate-speech detection · nothing leaves this machine</p>
     </div>
   </div>
-  <div class="row">
+  <div class="row" style="align-items:center">
     <span id="backendPill" class="pill">checking…</span>
-    <button id="themeBtn" type="button" aria-label="Switch colour theme">Theme</button>
+    <button id="themeBtn" type="button">Theme</button>
   </div>
 </header>
 
+<p class="banner-note">Research prototype for J26-DS-316. Screenshots below are
+  deliberately blurred — the engine reads the frame in memory and erases it; only
+  scores and this blurred preview are kept.</p>
+
 <div id="err" class="err" role="alert" hidden></div>
 
-<div id="status" class="status" role="status" aria-live="polite">
-  <span class="dot" aria-hidden="true"></span>
-  <div>
-    <h2 id="statusTitle">Starting…</h2>
-    <p id="statusText">Checking the detection engine.</p>
-  </div>
+<div id="banner" class="banner" role="status" aria-live="polite">
+  <span class="ico" aria-hidden="true">•</span>
+  <div><h2 id="bTitle">Starting…</h2><p id="bText">Checking the detection engine.</p></div>
 </div>
 
-<main id="main" class="grid">
+<main id="main">
 
-  <!-- LEFT ------------------------------------------------------------- -->
-  <div>
-    <section class="card" aria-labelledby="h-mon">
-      <div class="spread">
-        <div>
-          <h2 id="h-mon">Screen &amp; audio monitoring</h2>
-          <p class="sub">Frames are analysed in memory and erased immediately. Only scores and a blurred preview are kept.</p>
-        </div>
+  <!-- 1 ── FOCUS ---------------------------------------------------------- -->
+  <section class="sec" aria-labelledby="h-focus">
+    <header>
+      <div>
+        <h2 id="h-focus"><span class="step" aria-hidden="true">1</span>Where the engine looked</h2>
+        <p>Every region it read on screen, and which one triggered the alert.</p>
       </div>
-      <div class="row" style="align-items:flex-end">
-        <div style="flex:1;min-width:130px">
-          <label for="age">Child's age</label>
-          <select id="age">
-            <option value="9">8–10 years (most protective)</option>
-            <option value="12">11–13 years</option>
-            <option value="15">14–15 years</option>
-          </select>
-        </div>
-        <div style="width:150px">
-          <label for="interval">Check every</label>
-          <select id="interval">
-            <option value="2.5">2.5 seconds</option>
-            <option value="5">5 seconds</option>
-            <option value="10">10 seconds</option>
-          </select>
-        </div>
-        <button id="btnStart" class="primary" type="button">Start monitoring</button>
-        <button id="btnStop" type="button" disabled>Stop</button>
-      </div>
-      <p class="note" id="sensitivityNote"></p>
-    </section>
+      <span id="focusPill" class="pill">—</span>
+    </header>
+    <div class="body"><div id="focus"></div></div>
+  </section>
 
-    <section class="card" aria-labelledby="h-feed">
-      <div class="spread">
-        <div>
-          <h2 id="h-feed">Recent checks</h2>
-          <p class="sub">Newest first. Select one to see why it was scored that way.</p>
-        </div>
+  <!-- 2 ── REASONING ------------------------------------------------------ -->
+  <section class="sec" aria-labelledby="h-why">
+    <header>
+      <div>
+        <h2 id="h-why"><span class="step" aria-hidden="true">2</span>Why it decided that</h2>
+        <p>Each check that ran, what it scored, and how that compares to this child's age limit.</p>
+      </div>
+    </header>
+    <div class="body"><div id="why"></div></div>
+  </section>
+
+  <!-- 3 ── HISTORY + TEST ------------------------------------------------- -->
+  <div class="grid2">
+    <section class="sec" aria-labelledby="h-feed">
+      <header>
+        <div><h2 id="h-feed"><span class="step" aria-hidden="true">3</span>Recent checks</h2>
+          <p>Newest first. Select one to load it above.</p></div>
         <span id="statsPill" class="pill">—</span>
-      </div>
-      <ul id="feed" class="feed" aria-label="Recent checks"></ul>
+      </header>
+      <div class="body" style="padding:6px 12px"><ul id="feed" class="feed" aria-label="Recent checks"></ul></div>
     </section>
 
-    <section class="card" aria-labelledby="h-try">
-      <h2 id="h-try">Try it yourself</h2>
-      <p class="sub">Paste a message, or upload a screenshot or voice clip, and see exactly how it is judged.</p>
-      <label for="manualText">Message text</label>
-      <textarea id="manualText" placeholder="e.g. gg ez noob&#10;or paste a chat message to test"></textarea>
-      <div class="row" style="margin-top:10px;align-items:flex-end">
-        <div style="flex:1;min-width:150px">
-          <label for="fImage">Screenshot (optional)</label>
-          <input id="fImage" type="file" accept="image/*" />
+    <section class="sec" aria-labelledby="h-try">
+      <header><div><h2 id="h-try"><span class="step" aria-hidden="true">4</span>Try it</h2>
+        <p>Type a message or upload a screenshot to see the engine work.</p></div></header>
+      <div class="body">
+        <label for="manualText">Message text</label>
+        <textarea id="manualText" placeholder="e.g. gg ez noob"></textarea>
+        <div class="row" style="margin-top:11px">
+          <div style="flex:1;min-width:140px">
+            <label for="fImage">Screenshot</label>
+            <input id="fImage" type="file" accept="image/*" />
+          </div>
+          <div style="flex:1;min-width:140px">
+            <label for="fAudio">Voice clip</label>
+            <input id="fAudio" type="file" accept="audio/*" />
+          </div>
+          <button id="btnAnalyze" class="primary" type="button">Check it</button>
         </div>
-        <div style="flex:1;min-width:150px">
-          <label for="fAudio">Voice clip (optional)</label>
-          <input id="fAudio" type="file" accept="audio/*" />
+        <hr style="border:0;border-top:1px solid var(--line);margin:18px 0" />
+        <div class="row">
+          <div style="flex:1;min-width:150px">
+            <label for="age">Child's age</label>
+            <select id="age">
+              <option value="9">8–10 years (most protective)</option>
+              <option value="12">11–13 years</option>
+              <option value="15">14–15 years</option>
+            </select>
+          </div>
+          <div style="width:135px">
+            <label for="interval">Check every</label>
+            <select id="interval">
+              <option value="2.5">2.5 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="30" selected>30 seconds</option>
+            </select>
+          </div>
+          <button id="btnStart" class="primary" type="button">Start monitoring</button>
+          <button id="btnStop" type="button" disabled>Stop</button>
         </div>
-        <button id="btnAnalyze" class="primary" type="button">Check it</button>
+        <p class="note" id="sensNote"></p>
       </div>
     </section>
   </div>
 
-  <!-- RIGHT ------------------------------------------------------------ -->
-  <div>
-    <section class="card" aria-labelledby="h-detail">
-      <h2 id="h-detail">Why this result</h2>
-      <p class="sub">Every number that moved the decision, and what was read from the screen.</p>
-      <div id="detail"></div>
-    </section>
-
-    <section class="card" aria-labelledby="h-health">
-      <h2 id="h-health">System health</h2>
-      <p class="sub">Which parts of the engine are running on this machine.</p>
-      <div id="health"></div>
-    </section>
-  </div>
+  <!-- 4 ── HEALTH --------------------------------------------------------- -->
+  <section class="sec" aria-labelledby="h-health">
+    <header><div><h2 id="h-health"><span class="step" aria-hidden="true">5</span>Engine status</h2>
+      <p>Which parts are running on this machine.</p></div></header>
+    <div class="body"><div id="health"></div></div>
+  </section>
 </main>
 </div>
 
 <script>
 "use strict";
-/* ---------- helpers ---------------------------------------------------- */
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
-  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
-const pct = (n) => Math.max(0, Math.min(100, (Number(n) || 0) * 100));
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const pct = n => Math.max(0, Math.min(100, (Number(n) || 0) * 100));
 const num = (n, d = 2) => (Number(n) || 0).toFixed(d);
+const LIMITS = { 9: 0.55, 12: 0.65, 15: 0.75 };
+let runs = [], selected = null, timer = null;
 
-const THRESHOLDS = { 9: 0.55, 12: 0.65, 15: 0.75 };
-let selectedId = null, latestRuns = [], timer = null, capturing = false;
+async function api(p, o) { const r = await fetch(p, o); if (!r.ok) throw new Error(`${p} → ${r.status}`); return r.json(); }
+function showErr(m) { const e = $("err"); if (!m) { e.hidden = true; return; } e.hidden = false; e.textContent = m; }
 
-async function api(path, opts) {
-  const res = await fetch(path, opts);
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
-  return res.json();
-}
-function showErr(msg) {
-  const el = $("err");
-  if (!msg) { el.hidden = true; return; }
-  el.hidden = false; el.textContent = msg;
-}
-
-/* ---------- theme ------------------------------------------------------ */
-(function theme() {
-  let saved = null;
-  try { saved = localStorage.getItem("ga-theme"); } catch (_) {}
-  if (saved) document.documentElement.setAttribute("data-theme", saved);
+(function () {
+  let s = null; try { s = localStorage.getItem("ga-theme"); } catch (_) {}
+  if (s) document.documentElement.setAttribute("data-theme", s);
   $("themeBtn").onclick = () => {
-    const cur = document.documentElement.getAttribute("data-theme");
-    const isDark = cur ? cur === "dark"
-      : matchMedia("(prefers-color-scheme: dark)").matches;
-    const next = isDark ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", next);
-    try { localStorage.setItem("ga-theme", next); } catch (_) {}
+    const c = document.documentElement.getAttribute("data-theme");
+    const dark = c ? c === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    const n = dark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", n);
+    try { localStorage.setItem("ga-theme", n); } catch (_) {}
   };
 })();
 
-/* ---------- status banner ---------------------------------------------- */
-/* Plain language, because a parent reads this — not "protection_state=threat". */
-const STATUS_COPY = {
-  threat:   ["is-alert", "Something needs your attention",
-             "The most recent check found language that may be harmful. Open it below to see what was found."],
-  guarding: ["is-ok", "Monitoring is on",
+/* ---------- status ---------- */
+const STATES = {
+  threat:   ["alert", "▲", "Something needs your attention",
+             "The latest check found language that may be harmful. The details are below."],
+  guarding: ["ok", "●", "Monitoring is on",
              "The screen and speaker audio are being checked. Nothing harmful found so far."],
-  reviewing:["is-warn", "Reviewing something",
-             "A check scored close to the limit for this age, but stayed below it. No alert was raised."],
-  degraded: ["is-warn", "Running with reduced capability",
-             "Part of the engine is unavailable, so some content may not be checked. See System health."],
-  idle:     ["", "Monitoring is off",
-             "Press Start monitoring to begin checking the screen, or use Try it yourself to test a message."]
+  reviewing:["warn", "◆", "Looked closely at something",
+             "A check scored near this child's limit but stayed under it. No alert was raised."],
+  degraded: ["warn", "◆", "Running with reduced capability",
+             "Part of the engine is unavailable, so some content may not be checked."],
+  idle:     ["", "○", "Monitoring is off",
+             "Press Start monitoring, or use Try it to test a message or screenshot."]
 };
-function setStatus(state) {
-  const [cls, title, text] = STATUS_COPY[state] || STATUS_COPY.idle;
-  const el = $("status");
-  el.className = "status " + cls;
-  $("statusTitle").textContent = title;
-  $("statusText").textContent = text;
+function setBanner(state) {
+  const [cls, ico, t, p] = STATES[state] || STATES.idle;
+  $("banner").className = "banner " + cls;
+  $("banner").querySelector(".ico").textContent = ico;
+  $("bTitle").textContent = t; $("bText").textContent = p;
 }
 
-/* ---------- score meter ------------------------------------------------ */
-function meter(score, threshold) {
-  const s = pct(score), t = pct(threshold);
-  const cls = score >= threshold ? "alert" : (score >= threshold * 0.7 ? "warn" : "ok");
-  return `
-  <div class="meter">
-    <div class="track" role="img"
-         aria-label="Risk score ${num(score)} out of 1. The limit for this age is ${num(threshold)}.">
-      <div class="fill ${cls}" style="width:${s}%"></div>
-      <div class="thresh" style="left:${t}%" data-label="limit ${num(threshold)}"></div>
-    </div>
-    <div class="scale"><span>0.00 no risk</span><span>1.00 certain</span></div>
-  </div>`;
-}
-
-/* ---------- detection overlay -------------------------------------------
-   Boxes are normalised 0..1 of the original frame, so they sit correctly on
-   the 320px blurred thumbnail without knowing the capture resolution. A region
-   is drawn red only when a word rule actually matched it — colour here means
-   "this is why", not "something is here".                                   */
-function overlay(src, detections) {
-  const boxes = (detections || []).filter(d => Array.isArray(d.box) && d.box.length === 4);
-  const shapes = boxes.map(d => {
-    const [x0, y0, x1, y1] = d.box;
-    const w = Math.max(0, x1 - x0), h = Math.max(0, y1 - y0);
-    const picture = d.kind === "picture";
-    const hot = !picture && Number(d.score) >= 0.5;
-    const cls = picture ? "ov-pic" : (hot ? "ov-hot" : "ov-txt");
-    const label = picture ? "picture → vision model"
-      : (hot ? `${esc((d.hits || []).join(", ") || d.category || "rule")} ${num(d.score)}` : "");
-    return `<div class="ov ${cls}" style="left:${x0 * 100}%;top:${y0 * 100}%;
-      width:${w * 100}%;height:${h * 100}%" title="${esc(d.text || "")}">
-      ${label ? `<span class="ov-tag">${label}</span>` : ""}</div>`;
-  }).join("");
-  const hotCount = boxes.filter(d => d.kind !== "picture" && Number(d.score) >= 0.5).length;
-  return `<div class="ovwrap">
-      <img class="thumb" src="${src}" alt="Blurred screen preview with detection regions marked" />
-      ${shapes}
-    </div>
-    <p class="note">${boxes.length} region${boxes.length === 1 ? "" : "s"} read
-      · ${hotCount} matched a word rule</p>`;
-}
-
-function bar(name, value, why, muted) {
-  return `<div class="eb ${muted ? "muted" : ""}">
-    <div class="lab"><span class="n">${esc(name)}</span><span class="v">${num(value)}</span></div>
-    <div class="bar"><i style="width:${pct(value)}%"></i></div>
-    ${why ? `<div class="why">${esc(why)}</div>` : ""}
-  </div>`;
-}
-
-/* ---------- detail pane ------------------------------------------------ */
-function renderDetail(run) {
-  const box = $("detail");
+/* ---------- 1. focus view ----------
+   The screenshot is unreadable by design, so the boxes carry the meaning and
+   the list beside it carries the words. Regions that matched nothing are drawn
+   as thin outlines — present, but not competing with the one that fired.      */
+function renderFocus(run) {
+  const box = $("focus");
   if (!run) {
-    box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">◎</span>
-      Select a check on the left, or test a message below, to see the full reasoning.</div>`;
+    box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">▣</span>
+      Run a check to see where the engine looked.</div>`;
+    $("focusPill").textContent = "—"; return;
+  }
+  const dets = ((run.evidence || {}).detections) || [];
+  const text = dets.filter(d => d.kind !== "picture");
+  const hits = text.filter(d => Number(d.score) >= 0.5);
+  $("focusPill").textContent = `${text.length} regions · ${hits.length} matched`;
+
+  if (!run.thumb_data_url) {
+    box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">⌨</span>
+      This check was text only — there was no screen image to mark up.</div>`;
     return;
   }
-  const ev = run.evidence || {};
-  const s1 = run.stage1 || {}, s2 = run.stage2 || {}, lat = run.latency_ms || {};
+
+  const shapes = dets.filter(d => Array.isArray(d.box) && d.box.length === 4).map(d => {
+    const [x0, y0, x1, y1] = d.box;
+    const pic = d.kind === "picture";
+    const hot = !pic && Number(d.score) >= 0.5;
+    const tag = pic ? "picture → vision model"
+      : (hot ? `${esc((d.hits || [])[0] || d.category || "rule")} ${num(d.score)}` : "");
+    return `<div class="ov ${pic ? "ov-pic" : (hot ? "ov-hit" : "ov-q")}"
+      style="left:${x0*100}%;top:${y0*100}%;width:${(x1-x0)*100}%;height:${(y1-y0)*100}%"
+      title="${esc(d.text || "")}">${tag ? `<span class="ov-tag">${tag}</span>` : ""}</div>`;
+  }).join("");
+
+  /* A full desktop OCR pass returns 40+ lines, most of them UI fragments like
+     "=" or a stray glyph. Listing them in capture order buries the one line
+     that actually matched. So: drop 1-character noise, rank by score, and
+     collapse the quiet tail into a single count. */
+  const meaningful = text
+    .filter(d => (d.text || "").trim().length > 1)
+    .sort((a, b) => Number(b.score) - Number(a.score));
+  const TOP = 10;
+  const head = meaningful.slice(0, TOP);
+  const restCount = text.length - head.length;
+
+  const rows = head.length ? head.map(d => {
+    const hot = Number(d.score) >= 0.5;
+    return `<li class="${hot ? "hit" : ""}">
+      <span class="t" title="${esc(d.text || "")}">${esc(d.text)}</span>
+      ${hot ? `<span class="why">${esc((d.hits || [])[0] || d.category || "")}</span>` : ""}
+      <span class="s">${num(d.score)}</span></li>`;
+  }).join("") + (restCount > 0
+      ? `<li><span class="t" style="color:var(--faint)">+ ${restCount} more region${restCount === 1 ? "" : "s"} read, nothing matched</span></li>`
+      : "")
+    : `<li><span class="t" style="color:var(--muted)">No readable text in this frame.</span></li>`;
+
+  box.innerHTML = `<div class="focus">
+    <div>
+      <div class="shotwrap">
+        <img class="shot" src="${run.thumb_data_url}"
+             alt="Blurred screen preview with the regions the engine read marked" />
+        ${shapes}
+      </div>
+      <div class="legend">
+        <span><i class="lg-q"></i>read, matched nothing</span>
+        <span><i class="lg-hit"></i>matched a word rule</span>
+        <span><i class="lg-pic"></i>sent to the vision model</span>
+      </div>
+      <p class="note">Blurred and shrunk on purpose — the original frame was erased from memory.</p>
+    </div>
+    <div class="readout">
+      <h3>What it read</h3>
+      <p class="hint">Highest-scoring regions first, with the score the word rules gave each one.</p>
+      <ul class="rows">${rows}</ul>
+      ${(run.image_caption || "").trim() ? `<div class="quote"><b>Vision model described the picture as</b>${esc(run.image_caption)}</div>` : ""}
+      ${(run.transcript_snippet || "").trim() ? `<div class="quote"><b>Speech heard</b>${esc(run.transcript_snippet)}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+/* ---------- 2. reasoning ---------- */
+function renderWhy(run) {
+  const box = $("why");
+  if (!run) { box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">◎</span>
+    Select a check to see the reasoning behind its score.</div>`; return; }
+
+  const ev = run.evidence || {}, s1 = run.stage1 || {}, s2 = run.stage2 || {}, lat = run.latency_ms || {};
   const age = Number(run.child_age) || 10;
-  const threshold = age <= 10 ? 0.55 : (age <= 13 ? 0.65 : 0.75);
-  const score = Number(run.score) || 0;
-  const isHate = run.decision === "hate";
+  const limit = age <= 10 ? 0.55 : (age <= 13 ? 0.65 : 0.75);
+  const score = Number(run.score) || 0, isHate = run.decision === "hate";
 
-  const verdict = isHate
-    ? `<span class="pill alert">Flagged &middot; ${esc(run.category || "harm")}</span>`
-    : (ev.escalated ? `<span class="pill warn">Checked closely &middot; below the limit</span>`
-                    : `<span class="pill ok">Cleared at first check</span>`);
+  const verdict = isHate ? `<span class="pill alert">▲ Alert · ${esc(run.category || "harm")}</span>`
+    : (ev.escalated ? `<span class="pill warn">◆ Looked closely · under the limit</span>`
+                    : `<span class="pill ok">● Cleared at first check</span>`);
 
-  /* Evidence: which detector actually fired. */
   const lex = Number(ev.lexicon_score ?? s1.lexicon_score ?? 0);
   const mod = ev.model_score == null ? null : Number(ev.model_score);
   const vis = Number(s1.vision_score ?? 0);
-  let evidence = bar("Word & phrase rules", lex,
-    lex >= 0.5 ? "Matched a known harmful phrase." : "No harmful phrase matched.");
-  if (mod != null) {
-    /* Show the labels the model actually emitted, not just the collapsed
-       score — "why did it say that" is the whole point of this panel. */
-    const labels = ev.model_labels || {};
-    const shown = Object.keys(labels).slice(0, 3)
-      .map(k => `${esc(k.replace(/_/g, " "))} ${num(labels[k])}`).join(" · ");
-    evidence += bar("Language model", mod,
-      (mod >= 0.5 ? "The model judged this language harmful." : "The model did not judge this harmful.")
-      + (shown ? "  Read as: " + shown : ""));
-  } else if (lex >= 0.88) {
-    /* Not an omission: the rules already matched at full confidence, so the
-       model was skipped on purpose. Saying nothing here reads as a failure. */
-    evidence += `<div class="eb muted"><div class="lab"><span class="n">Language model</span>
-      <span class="v">not run</span></div><div class="bar"><i style="width:0%"></i></div>
-      <div class="why">Skipped — the word rules already matched with full confidence,
-        so the model could not change the result.</div></div>`;
-  }
-  if (vis > 0) {
-    evidence += bar("Picture check", vis,
-      ev.vision_calibrated ? "Counted towards the score."
-        : "Not counted — this branch is not yet validated, so it cannot change the result.",
-      !ev.vision_calibrated);
-  }
+  const labels = ev.model_labels || {};
+  const shown = Object.keys(labels).slice(0, 3).map(k => `${esc(k.replace(/_/g, " "))} ${num(labels[k])}`).join(" · ");
 
-  const framing = ev.framing_reason
-    ? `<div class="quote"><span class="src">Score reduced</span>
-        This text looks like someone <strong>reporting or quoting</strong> harm rather than committing it
-        ${ev.score_before_framing != null
-          ? `— lowered from ${num(ev.score_before_framing)} to ${num(score)}.` : "."}
-        A child asking for help should never trigger an alert.</div>` : "";
+  let bars = ebar("Word & phrase rules", lex, lex >= 0.5 ? "Matched a known harmful phrase." : "No harmful phrase matched.");
+  if (mod != null) bars += ebar("Language model", mod,
+    (mod >= 0.5 ? "Judged this language harmful." : "Did not judge this harmful.") + (shown ? " · " + shown : ""));
+  else if (lex >= 0.88) bars += ebarOff("Language model", "not run",
+    "Skipped — the word rules already matched at full confidence, so it could not change the result.");
+  if (vis > 0) bars += ebar("Picture check", vis, ev.vision_calibrated
+    ? "Counted towards the score." : "Shown only — this branch is not validated, so it cannot change the result.",
+    !ev.vision_calibrated);
 
-  /* What was actually read. */
-  const reads = [
-    ["On-screen text", run.ocr_snippet],
-    ["Speech heard", run.transcript_snippet],
-    ["Picture described as", run.image_caption],
-    ["Words inside the picture", run.image_text]
-  ].filter(([, v]) => (v || "").trim())
-   .map(([k, v]) => `<div class="quote"><span class="src">${esc(k)}</span>${esc(v)}</div>`)
-   .join("") || `<p class="note">Nothing readable was found in this check.</p>`;
+  const framing = ev.framing_reason ? `<div class="quote"><b>Score was reduced</b>
+    This reads as someone <strong>reporting or quoting</strong> harm rather than committing it
+    ${ev.score_before_framing != null ? `— lowered from ${num(ev.score_before_framing)} to ${num(score)}.` : "."}
+    A child asking for help should never trigger an alert.</div>` : "";
 
-  const steps = (run.trace && run.trace.steps) || [];
-  const glyph = { ok: "✓", fail: "✕", skip: "–", warn: "!" };
-  const trace = steps.length ? `<ul class="trace">${steps.map(s => `
-      <li><span class="g ${esc(s.status)}" aria-hidden="true">${glyph[s.status] || "•"}</span>
-        <span class="nm">${esc(s.label)}<span class="vh"> — ${esc(s.status)}</span>
-          <div class="dt">${esc(s.detail || "")}</div></span>
-        <span class="ms">${s.ms ? num(s.ms, 0) + " ms" : ""}</span></li>`).join("")}</ul>` : "";
-
+  const cls = score >= limit ? "alert" : (score >= limit * .7 ? "warn" : "");
   box.innerHTML = `
-    <div class="row" style="justify-content:space-between;margin-bottom:2px">
-      ${verdict}
-      <span class="pill">${esc(run.app_exe || "unknown")} &middot; ${esc((run.ts || "").slice(11, 19))}</span>
-    </div>
-    ${meter(score, threshold)}
-    <p class="note">Score <strong>${num(score)}</strong>; the limit for a ${age}-year-old is
-      <strong>${num(threshold)}</strong>. ${isHate
-        ? "Because the score reached the limit, an alert was raised."
-        : "Because the score stayed below the limit, no alert was raised."}</p>
-    ${run.child_safe_summary ? `<div class="quote"><span class="src">What the child would be told</span>${esc(run.child_safe_summary)}</div>` : ""}
+    <div class="verdict">${verdict}
+      <span class="pill">${esc(run.app_exe || "unknown")}</span>
+      <span class="pill">${esc((run.ts || "").slice(11, 19))}</span>
+      <span class="pill">${num(lat.total_ms, 0)} ms</span></div>
+    <div class="meter"><div class="track" role="img"
+        aria-label="Risk ${num(score)} of 1. Limit for this age is ${num(limit)}.">
+        <div class="fill ${cls}" style="width:${pct(score)}%"></div>
+        <div class="limit" style="left:${pct(limit)}%" data-l="limit ${num(limit)}"></div></div>
+      <div class="scale"><span>0.00 no risk</span><span>1.00 certain</span></div></div>
+    <p style="font-size:13.5px;margin:12px 0 0">Scored <strong>${num(score)}</strong>;
+      the limit for a ${age}-year-old is <strong>${num(limit)}</strong>.
+      ${isHate ? "It reached the limit, so an alert was raised."
+               : "It stayed under the limit, so no alert was raised."}</p>
+    ${run.child_safe_summary ? `<div class="quote"><b>What the child would be told</b>${esc(run.child_safe_summary)}</div>` : ""}
     ${framing}
-    <hr class="sep" />
-    <h2>What each check found</h2>
-    ${evidence}
-    ${(run.lexicon_hits || []).length
-      ? `<p class="note">Rules matched: ${run.lexicon_hits.map(h => `<code class="mono">${esc(h)}</code>`).join(", ")}</p>` : ""}
-    <hr class="sep" />
-    <h2>What was read from the screen</h2>
-    ${reads}
-    ${run.thumb_data_url ? `
-      <h2>Where it looked</h2>
-      ${overlay(run.thumb_data_url, ev.detections || [])}
-      <p class="note">Blurred and shrunk on purpose. The original frame was erased from
-        memory and never saved. Boxes show every region the engine read — red where a
-        word rule matched, blue where the picture was sent to the vision model.</p>` : ""}
-    ${trace ? `<hr class="sep" /><h2>How the check ran</h2>${trace}` : ""}
-    <hr class="sep" />
-    <dl class="kv">
-      <dt>Combined score</dt><dd>${num(s2.fused ?? score)}</dd>
-      <dt>How it combined</dt><dd>${esc(ev.fusion_mode || "—")}</dd>
-      <dt>Total time</dt><dd>${num(lat.total_ms, 0)} ms</dd>
-    </dl>`;
+    <div style="margin-top:16px">${bars}</div>
+    ${(run.lexicon_hits || []).length ? `<p class="note">Rules matched:
+      ${run.lexicon_hits.map(h => `<code class="mono">${esc(h)}</code>`).join(", ")}</p>` : ""}`;
+}
+function ebar(name, v, why, off) {
+  return `<div class="eb ${off ? "off" : ""}"><div class="lab"><b>${esc(name)}</b><span>${num(v)}</span></div>
+    <div class="bar"><i style="width:${pct(v)}%"></i></div>
+    ${why ? `<div class="why">${esc(why)}</div>` : ""}</div>`;
+}
+function ebarOff(name, label, why) {
+  return `<div class="eb off"><div class="lab"><b>${esc(name)}</b><span>${esc(label)}</span></div>
+    <div class="bar"><i style="width:0%"></i></div><div class="why">${esc(why)}</div></div>`;
 }
 
-/* ---------- feed -------------------------------------------------------- */
-function renderFeed(runs) {
-  const feed = $("feed");
-  if (!runs.length) {
-    feed.innerHTML = `<li><div class="empty"><span class="big" aria-hidden="true">◔</span>
-      No checks yet. Start monitoring, or test a message below.</div></li>`;
-    return;
-  }
-  feed.innerHTML = runs.map(r => {
-    const hate = r.decision === "hate";
-    const ev = r.evidence || {};
-    const sev = hate ? "alert" : (ev.escalated ? "warn" : "");
-    const when = (r.ts || "").slice(11, 19);
-    const what = hate ? `Flagged: ${r.category || "harm"}`
-      : (ev.escalated ? "Checked closely, cleared" : "Cleared");
-    return `<li><button class="item" type="button" data-id="${esc(r.id)}"
-        aria-current="${r.id === selectedId}">
-      <span class="sev ${sev}" aria-hidden="true"></span>
-      <span class="body">
-        <span class="t1">${esc(what)}</span>
-        <span class="t2">${esc(r.app_exe || "unknown")} &middot; ${esc(when)}</span>
-      </span>
-      <span class="sc">${num(r.score)}</span>
-    </button></li>`;
+/* ---------- 3. feed ---------- */
+function renderFeed() {
+  const f = $("feed");
+  if (!runs.length) { f.innerHTML = `<li><div class="empty"><span class="big" aria-hidden="true">◔</span>
+    No checks yet.</div></li>`; return; }
+  f.innerHTML = runs.map(r => {
+    const ev = r.evidence || {}, hate = r.decision === "hate";
+    const cls = hate ? "alert" : (ev.escalated ? "warn" : "");
+    const what = hate ? `Alert: ${r.category || "harm"}` : (ev.escalated ? "Checked closely, cleared" : "Cleared");
+    return `<li><button type="button" data-id="${esc(r.id)}" aria-current="${r.id === selected}">
+      <span class="dot ${cls}" aria-hidden="true"></span>
+      <span class="b"><span class="b1">${esc(what)}</span>
+        <span class="b2">${esc(r.app_exe || "unknown")} · ${esc((r.ts || "").slice(11, 19))}</span></span>
+      <span class="sc">${num(r.score)}</span></button></li>`;
   }).join("");
-  feed.querySelectorAll("button.item").forEach(b => {
-    b.onclick = () => { selectedId = b.dataset.id; paint(); };
-  });
+  f.querySelectorAll("button").forEach(b => b.onclick = () => { selected = b.dataset.id; paint(); });
 }
 
-/* ---------- health ------------------------------------------------------ */
-const BACKEND_COPY = {
-  ocr: "Reading text on screen",
-  asr: "Understanding speech",
-  text_fast: "Judging language (first check)",
-  text_full: "Re-reading long text (second check)",
-  image_fast: "Judging pictures",
-  clip: "Understanding images",
-  vision_meaning: "Describing pictures (memes)"
-};
-function renderHealth(status) {
-  const b = (status && status.backends) || {};
-  const rows = Object.keys(BACKEND_COPY).map(k => {
+/* ---------- 5. health ---------- */
+const NAMES = { ocr:"Reading text on screen", asr:"Understanding speech",
+  text_fast:"Judging language (first check)", text_full:"Re-reading long text (second check)",
+  image_fast:"Judging pictures", clip:"Understanding images", vision_meaning:"Describing pictures (memes)" };
+function renderHealth(st) {
+  const b = (st && st.backends) || {};
+  $("health").innerHTML = Object.keys(NAMES).map(k => {
     const v = String(b[k] ?? "none");
     const off = v === "none" || v === "deferred" || v.endsWith("_failed");
     const uncal = v.includes("uncalibrated");
     const cls = off ? "warn" : (uncal ? "info" : "ok");
     const word = off ? "not installed" : (uncal ? "shown, not counted" : "working");
-    return `<div class="spread" style="padding:6px 0;border-bottom:1px solid var(--line)">
-      <span style="font-size:13px">${esc(BACKEND_COPY[k])}</span>
+    return `<div class="hrow"><span>${esc(NAMES[k])}</span>
       <span class="pill ${cls}" title="${esc(v)}">${word}</span></div>`;
-  }).join("");
-  const err = status && status.last_error
-    ? `<p class="note" style="color:var(--warn)">${esc(status.last_error)}</p>` : "";
-  $("health").innerHTML = rows + err +
-    `<p class="note">“Shown, not counted” means a check runs and is displayed as evidence, but is not
-      allowed to change the score until it has been validated against labelled data.</p>`;
+  }).join("") + (st && st.last_error ? `<p class="note" style="color:var(--warn)">${esc(st.last_error)}</p>` : "")
+    + `<p class="note">“Shown, not counted” means a check runs and is displayed as evidence,
+       but is not allowed to change the score until it has been validated.</p>`;
 }
 
-/* ---------- paint / refresh --------------------------------------------- */
+/* ---------- refresh ---------- */
 function paint() {
-  renderFeed(latestRuns);
-  const run = latestRuns.find(r => r.id === selectedId) || latestRuns[0] || null;
-  if (run) selectedId = run.id;
-  renderDetail(run);
+  renderFeed();
+  const run = runs.find(r => r.id === selected) || runs[0] || null;
+  if (run) selected = run.id;
+  renderFocus(run); renderWhy(run);
 }
-
 async function refresh() {
   try {
-    const [status, runsData] = await Promise.all([
-      api("/api/status"), api("/api/runs?limit=40")
-    ]);
+    const [st, rd] = await Promise.all([api("/api/status"), api("/api/runs?limit=40")]);
     showErr("");
-    capturing = !!status.capturing;
-    $("btnStart").disabled = capturing;
-    $("btnStop").disabled = !capturing;
-    setStatus(status.protection || (capturing ? "guarding" : "idle"));
-
-    const st = status.stats || {};
-    $("statsPill").textContent = `${st.total || 0} checked · ${st.hate || 0} flagged`;
-    const tf = (status.backends || {}).text_fast || "";
+    $("btnStart").disabled = !!st.capturing; $("btnStop").disabled = !st.capturing;
+    setBanner(st.protection || (st.capturing ? "guarding" : "idle"));
+    const s = st.stats || {};
+    $("statsPill").textContent = `${s.total || 0} checked · ${s.hate || 0} flagged`;
+    const tf = (st.backends || {}).text_fast || "";
     $("backendPill").textContent = tf.includes("hf:") ? "Models loaded" : "Rules only";
     $("backendPill").className = "pill " + (tf.includes("hf:") ? "ok" : "warn");
-
-    latestRuns = runsData.runs || [];
-    renderHealth(status);
-    paint();
+    runs = rd.runs || [];
+    renderHealth(st); paint();
   } catch (e) {
     showErr("Cannot reach the Analyst service. Is `python -m analyst.serve` still running?");
-    setStatus("degraded");
+    setBanner("degraded");
   }
 }
 
-/* ---------- actions ------------------------------------------------------ */
-$("age").onchange = () => {
-  const t = THRESHOLDS[$("age").value];
-  $("sensitivityNote").textContent =
-    `An alert is raised when the risk score reaches ${num(t)}. Younger ages use a lower limit, so more is flagged.`;
-};
+/* ---------- actions ---------- */
+$("age").onchange = () => { $("sensNote").textContent =
+  `An alert is raised at ${num(LIMITS[$("age").value])} or above. Younger ages use a lower limit, so more is flagged.`; };
 $("age").onchange();
-
 $("btnStart").onclick = async () => {
-  try {
-    await api("/api/capture/start", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ age: Number($("age").value), interval_s: Number($("interval").value) })
-    });
-    refresh();
-  } catch (e) { showErr("Could not start monitoring: " + e.message); }
+  try { await api("/api/capture/start", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ age:Number($("age").value), interval_s:Number($("interval").value) }) }); refresh(); }
+  catch (e) { showErr("Could not start monitoring: " + e.message); }
 };
 $("btnStop").onclick = async () => {
-  try { await api("/api/capture/stop", { method: "POST" }); refresh(); }
+  try { await api("/api/capture/stop", { method:"POST" }); refresh(); }
   catch (e) { showErr("Could not stop monitoring: " + e.message); }
 };
-
 $("btnAnalyze").onclick = async () => {
-  const btn = $("btnAnalyze");
-  const text = $("manualText").value.trim();
+  const btn = $("btnAnalyze"), t = $("manualText").value.trim();
   const img = $("fImage").files[0], aud = $("fAudio").files[0];
-  if (!text && !img && !aud) { showErr("Type a message, or choose a screenshot or voice clip first."); return; }
+  if (!t && !img && !aud) { showErr("Type a message, or choose a screenshot or voice clip first."); return; }
   const fd = new FormData();
-  fd.append("age", $("age").value); fd.append("text", text);
-  if (img) fd.append("image", img);
-  if (aud) fd.append("audio", aud);
+  fd.append("age", $("age").value); fd.append("text", t);
+  if (img) fd.append("image", img); if (aud) fd.append("audio", aud);
   btn.disabled = true; btn.textContent = "Checking…";
   try {
-    const res = await fetch("/api/analyze", { method: "POST", body: fd });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    const data = await res.json();
-    showErr("");
-    selectedId = data.run_id;
-    await refresh();
-    $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
-  } catch (e) {
-    showErr("Could not check that: " + e.message);
-  } finally { btn.disabled = false; btn.textContent = "Check it"; }
+    const r = await fetch("/api/analyze", { method:"POST", body: fd });
+    if (!r.ok) throw new Error("status " + r.status);
+    const d = await r.json();
+    showErr(""); selected = d.run_id; await refresh();
+    $("focus").scrollIntoView({ behavior:"smooth", block:"start" });
+  } catch (e) { showErr("Could not check that: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = "Check it"; }
 };
 
-/* ---------- boot --------------------------------------------------------- */
 refresh();
 timer = setInterval(refresh, 3000);
 document.addEventListener("visibilitychange", () => {
