@@ -142,4 +142,7 @@ def build_evidence(result: AnalystRunResult) -> dict:
         "fusion_mode": result.fusion_mode or "idle",
         "escalated": bool(result.escalated),
         "explanation": result.explanation or "",
+        # Capped: a busy desktop can yield 50+ text lines and this rides along
+        # in every stored row.
+        "detections": list(result.detections or [])[:40],
     }

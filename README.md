@@ -107,7 +107,8 @@ app/                     Shared Next.js sandbox for C3/C4 demo UI — not C2 det
 | CLI + `--replay` | **Working** |
 | OCR (RapidOCR) / ASR (Whisper tiny) | **Working** — install from `requirements.txt` |
 | Accuracy harness + dev/held-out corpora | **Working** — `analyst/evaluation/` |
-| CLIP / image_fast / text_full ONNX | **Deferred plugs** — Milestone A2/A3 |
+| Meme reader (image meaning + words, via local VLM) | **Working** — needs LM Studio |
+| Vision channel (`image_fast`) | **Measured, not shipped** — probe AUC 0.61, bar 0.65 |
 | ZeroMQ bus + C1 frame subscribe | **Later integration** |
 | Next.js / offline_backend web demo | **Teammate C3/C4 sandbox** — not used for C2 detection |
 

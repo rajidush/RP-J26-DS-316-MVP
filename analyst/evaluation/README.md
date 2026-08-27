@@ -131,6 +131,46 @@ and teaches them the tool is noise. **Precision has no second chance; recall
 does.** The cost is visible and stated: held-out recall falls 40% → 30% on the
 hand-written implicit cases.
 
+## The vision channel: why it still does not count
+
+`image_fast` reports `calibrated = False`, so fusion shows its score as evidence
+but never lets it move a decision. That is a measured position, not caution.
+
+**Zero-shot CLIP is a noise floor.** Prompt-bank cosine scoring returned
+0.324–0.393 for every image tried — clean gaming, a hateful poster, an abstract
+shape. The hate asset ranked *below* a benign one. Averaged into fusion it
+pulled a confirmed OCR'd "you should kys" from 0.88 to 0.685 and cleared it for
+ages 14–15, which is why the calibration gate exists at all.
+
+**A trained probe does better, but not enough yet.** Logistic regression on
+frozen CLIP ViT-B/32 embeddings, 1,200 training rows from Facebook Hateful
+Memes, evaluated on the held-out `dev_seen` split (398 rows, 49.7% positive):
+
+| probe input | ROC AUC | accuracy | score spread |
+|---|---|---|---|
+| image only | 0.5951 | 59.3% | 0.18 – 0.90 |
+| text only | 0.5926 | 56.5% | 0.14 – 0.82 |
+| **image + text** | **0.6108** | 56.3% | 0.13 – 0.90 |
+| *(zero-shot, for contrast)* | *n/a* | *n/a* | *0.32 – 0.39* |
+
+Three things follow, and all three are worth stating:
+
+1. **The probe learns something real.** A 0.13–0.90 spread against zero-shot's
+   dead 0.32–0.39 band is the difference between a signal and a constant.
+2. **Combining beats either modality alone**, exactly as the benign-confounder
+   design predicts: image and caption are each innocuous, the harm is in the
+   pair. This is direct evidence *for* the multimodal architecture.
+3. **0.61 is still not enough to move a safety decision**, so the probe is
+   written for the record and not loaded. The bar is 0.65.
+
+This sits in the published range for linear probes over frozen CLIP features on
+this dataset. Closing the remaining distance needs a stronger backbone (ViT-L
+costs ~1.2 GB, over the project's 2 GB budget) or a trained fusion head rather
+than a linear one — which is Milestone A3, not a tuning exercise.
+
+Reproduce with `python -m analyst.evaluation.train_image_probe --rows 1200`.
+Embeddings are cached, so only the first run pays the download.
+
 ## Known gaps (measured, not hidden)
 
 **Correction.** An earlier version of this file reported "0% on threats" from

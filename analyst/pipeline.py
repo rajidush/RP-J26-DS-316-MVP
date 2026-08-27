@@ -124,12 +124,16 @@ class AnalystPipeline:
 
         def _timed_ocr():
             t = time.perf_counter()
+            regions: list = []
             try:
-                text = self.ocr.extract(image) if image is not None else ""
+                if image is not None:
+                    text, regions = self.ocr.read(image)
+                else:
+                    text = ""
             except Exception as exc:
                 notes.append(f"ocr_failed:{type(exc).__name__}")
                 text = ""
-            return text, round((time.perf_counter() - t) * 1000, 1)
+            return text, regions, round((time.perf_counter() - t) * 1000, 1)
 
         def _timed_asr():
             t = time.perf_counter()
@@ -144,12 +148,59 @@ class AnalystPipeline:
         with ThreadPoolExecutor(max_workers=2) as pool:
             ocr_f = pool.submit(_timed_ocr)
             asr_f = pool.submit(_timed_asr)
-            ocr_text, ocr_ms = ocr_f.result()
+            ocr_text, ocr_regions, ocr_ms = ocr_f.result()
             transcript, asr_ms = asr_f.result()
         latency["ocr_ms"] = ocr_ms
         latency["asr_ms"] = asr_ms
         latency["extract_ms"] = round((time.perf_counter() - t_extract) * 1000, 1)
-        return ocr_text, transcript
+        return ocr_text, transcript, ocr_regions
+
+    @staticmethod
+    def _mark_regions(regions: list, reading, image) -> list:
+        """Attach a per-region risk so the panel can colour the overlay.
+
+        Scored with the **lexicon only**, not the model heads. A busy desktop
+        yields 30-50 text lines; a model call each would cost seconds, whereas
+        the lexicon is ~1 ms and names the rule it matched. The overall decision
+        is unaffected — this is presentation, and it says exactly which layer
+        produced it so nobody mistakes a highlighted box for the verdict.
+        """
+        from .stage1.lexicon import score_text
+
+        marked = []
+        for region in regions:
+            text = region.get("text") or ""
+            score, category, hits = score_text(text) if text.strip() else (0.0, "none", [])
+            marked.append({
+                **region,
+                "score": round(float(score), 4),
+                "category": category,
+                "hits": list(hits[:3]),
+                "scored_by": "lexicon",
+            })
+
+        # The picture crop the vision model was actually shown, in the same
+        # normalised space, so the overlay can draw both kinds together.
+        if reading is not None and reading.box and image is not None:
+            width, height = image.size
+            if width and height:
+                left, top, right, bottom = reading.box
+                marked.append({
+                    "kind": "picture",
+                    "box": [
+                        round(max(0.0, min(1.0, left / width)), 4),
+                        round(max(0.0, min(1.0, top / height)), 4),
+                        round(max(0.0, min(1.0, right / width)), 4),
+                        round(max(0.0, min(1.0, bottom / height)), 4),
+                    ],
+                    "text": (reading.caption or "")[:120],
+                    "conf": 0.0,
+                    "score": 0.0,
+                    "category": "none",
+                    "hits": [],
+                    "scored_by": "vision-language model",
+                })
+        return marked
 
     def _score_text(self, blob: str, notes: list) -> ScoreDetail:
         """Stage-1 text scoring that cannot take the tick down with it."""
@@ -203,7 +254,7 @@ class AnalystPipeline:
         image = _image_from_bytes(frame)
         latency: dict[str, float] = {}
 
-        ocr_text, transcript = self._extract(image, audio, notes, latency)
+        ocr_text, transcript, ocr_regions = self._extract(image, audio, notes, latency)
         reading = self._read_picture(image, notes, latency)
 
         # --- text channel ----------------------------------------------------
@@ -341,6 +392,7 @@ class AnalystPipeline:
             model_score=detail.model_score,
         )
 
+        detections = self._mark_regions(ocr_regions, reading, image)
         latency["total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         return AnalystRunResult(
@@ -352,6 +404,7 @@ class AnalystPipeline:
             image_caption=(reading.caption[:400] if reading else ""),
             image_text=(reading.image_text[:400] if reading else ""),
             image_region=(list(reading.box) if reading and reading.box else None),
+            detections=detections,
             transcript=transcript[:500],
             stage1=stage1,
             stage2=stage2,

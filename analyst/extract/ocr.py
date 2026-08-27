@@ -24,7 +24,7 @@ a slower, more thorough profile is one variable away.
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from PIL import Image, ImageEnhance
@@ -132,25 +132,71 @@ class OcrEngine:
         except Exception:
             self._tesseract = None
 
-    def extract(self, image: Optional[Image.Image]) -> str:
+    def read(self, image: Optional[Image.Image]) -> Tuple[str, list]:
+        """One OCR pass -> joined text plus per-line boxes.
+
+        Both come from the same inference deliberately. Running OCR twice to
+        collect boxes would cost a second full pass, which is ~7 s on a real
+        1280x720 desktop — the single most expensive step in the cascade.
+
+        Boxes are normalised to 0..1 of the frame so they survive the 320 px
+        blurred thumbnail the panel draws on, and any change to capture
+        resolution. `_preprocess` scales uniformly, so normalised coordinates
+        are identical before and after it.
+        """
         if image is None:
-            return ""
+            return "", []
         if self._rapid is not None:
             try:
-                raw = self._rapid(_preprocess(image))
+                arr = _preprocess(image)
+                raw = self._rapid(arr)
+                height, width = arr.shape[0], arr.shape[1]
                 if self._rapid_api == "object":
                     lines = list(getattr(raw, "txts", None) or [])
+                    polys = getattr(raw, "boxes", None)
+                    confs = list(getattr(raw, "scores", None) or [])
                 else:
                     result = raw[0] if isinstance(raw, tuple) else raw
-                    lines = [
-                        row[1] for row in (result or []) if len(row) > 1 and row[1]
-                    ]
-                return " ".join(t for t in lines if t).strip()
+                    rows = [r for r in (result or []) if len(r) > 1 and r[1]]
+                    lines = [r[1] for r in rows]
+                    polys = [r[0] for r in rows]
+                    confs = [r[2] if len(r) > 2 else 0.0 for r in rows]
+                text = " ".join(t for t in lines if t).strip()
+                return text, _regions(polys, lines, confs, width, height)
             except Exception:
                 pass
         if self._tesseract is not None:
             try:
-                return (self._tesseract.image_to_string(image.convert("RGB")) or "").strip()
+                # Tesseract path has no boxes here; text still works.
+                return (self._tesseract.image_to_string(image.convert("RGB")) or "").strip(), []
             except Exception:
-                return ""
-        return ""
+                return "", []
+        return "", []
+
+    def extract(self, image: Optional[Image.Image]) -> str:
+        """Text only. Prefer read() when the caller also wants positions."""
+        return self.read(image)[0]
+
+
+def _regions(polys, lines, confs, width: int, height: int) -> list:
+    if polys is None or width <= 0 or height <= 0:
+        return []
+    out = []
+    for i, poly in enumerate(polys):
+        try:
+            xs = [float(pt[0]) for pt in poly]
+            ys = [float(pt[1]) for pt in poly]
+        except Exception:
+            continue
+        out.append({
+            "kind": "text",
+            "box": [
+                round(max(0.0, min(1.0, min(xs) / width)), 4),
+                round(max(0.0, min(1.0, min(ys) / height)), 4),
+                round(max(0.0, min(1.0, max(xs) / width)), 4),
+                round(max(0.0, min(1.0, max(ys) / height)), 4),
+            ],
+            "text": (lines[i] if i < len(lines) else "")[:120],
+            "conf": round(float(confs[i]), 3) if i < len(confs) else 0.0,
+        })
+    return out

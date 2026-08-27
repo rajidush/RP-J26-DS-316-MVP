@@ -103,6 +103,10 @@ class AnalystRunResult(BaseModel):
     image_caption: str = ""
     image_text: str = ""
     image_region: Optional[List[int]] = None
+    # Where on the frame each detection came from, normalised to 0..1 so the
+    # panel can draw an overlay on the 320px blurred thumbnail. Presentation
+    # only — the decision does not depend on these.
+    detections: List[Dict[str, Any]] = Field(default_factory=list)
     stage1: Dict[str, float] = Field(default_factory=dict)
     stage2: Optional[Dict[str, float]] = None
     backends: Dict[str, str] = Field(default_factory=dict)
