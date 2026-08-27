@@ -35,6 +35,8 @@ _MIN_WIDTH = 640
 _DET_SIDE_LEN = int(os.environ.get("ANALYST_OCR_SIDE_LEN", "960"))
 _OCR_THREADS = int(os.environ.get("ANALYST_OCR_THREADS", "4"))
 _OCR_USE_CLS = os.environ.get("ANALYST_OCR_CLS", "0").strip() in ("1", "true", "yes")
+# Sharpen/contrast enhancement, off by default — see _preprocess().
+_OCR_ENHANCE = os.environ.get("ANALYST_OCR_ENHANCE", "0").strip() in ("1", "true", "yes")
 
 
 def _rapid3_params() -> dict:
@@ -58,13 +60,28 @@ def _rapid3_params() -> dict:
 
 
 def _preprocess(image: Image.Image) -> np.ndarray:
+    """Upscale very small frames. No sharpening — it was measurably harmful.
+
+    This used to apply Sharpness(1.5) and Contrast(1.3). On a grid of 150 px
+    meme thumbnails that cost every phrase OCR would otherwise have read:
+
+        raw           2/4 target phrases recovered
+        enhanced      0/4
+
+    and on a full-size meme it changed nothing (2/2 either way). Unsharp
+    masking amplifies JPEG ringing around small glyphs, so the detector loses
+    strokes it could otherwise resolve — the enhancement only ever cost recall.
+
+    Set ANALYST_OCR_ENHANCE=1 to restore the old behaviour for comparison.
+    """
     rgb = image.convert("RGB")
     w, h = rgb.size
     if w < _MIN_WIDTH:
         scale = _MIN_WIDTH / w
         rgb = rgb.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-    rgb = ImageEnhance.Sharpness(rgb).enhance(1.5)
-    rgb = ImageEnhance.Contrast(rgb).enhance(1.3)
+    if _OCR_ENHANCE:
+        rgb = ImageEnhance.Sharpness(rgb).enhance(1.5)
+        rgb = ImageEnhance.Contrast(rgb).enhance(1.3)
     return np.array(rgb)
 
 

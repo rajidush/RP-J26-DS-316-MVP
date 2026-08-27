@@ -266,7 +266,10 @@ button.btn.primary:hover:not(:disabled){filter:brightness(1.08)}
         <p>Where the engine looked on screen, what it read there, and why that produced this score.</p></div>
       <p class="proto" id="previewNote"></p>
       <div class="panel">
-        <h2>Where the engine looked</h2>
+        <h2 style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          Where the engine looked
+          <span id="liveTag" class="pill ok">showing the latest check</span>
+        </h2>
         <div class="in" id="focus"></div>
       </div>
       <div class="panel">
@@ -357,6 +360,11 @@ const pct = n => Math.max(0, Math.min(100, (Number(n) || 0) * 100));
 const num = (n, d = 2) => (Number(n) || 0).toFixed(d);
 const LIMITS = { 9: 0.55, 12: 0.65, 15: 0.75 };
 let runs = [], selected = null, timer = null;
+/* Follow the newest check until the user deliberately picks one from the list.
+   Without this, `selected` stayed pinned to the first run ever shown, so new
+   captures arrived in `runs` but the view never moved — the page looked frozen
+   and only "updated" on a manual reload, which reset the pin. */
+let pinned = false;
 
 async function api(p, o) { const r = await fetch(p, o); if (!r.ok) throw new Error(`${p} → ${r.status}`); return r.json(); }
 function showErr(m) { const e = $("err"); if (!m) { e.hidden = true; return; } e.hidden = false; e.textContent = m; }
@@ -569,7 +577,9 @@ function renderFeed() {
         <span class="b2">${esc(r.app_exe || "unknown")} · ${esc((r.ts || "").slice(11, 19))}</span></span>
       <span class="sc">${num(r.score)}</span></button></li>`;
   }).join("");
-  f.querySelectorAll("button").forEach(b => b.onclick = () => { selected = b.dataset.id; paint(); });
+  f.querySelectorAll("button").forEach(b => b.onclick = () => {
+    selected = b.dataset.id; pinned = true; paint();
+  });
 }
 
 /* ---------- engine ---------- */
@@ -624,10 +634,16 @@ function renderPreviewNote(p) {
 
 /* ---------- refresh ---------- */
 function paint() {
+  // Live by default; only an explicit pick from the list freezes the view.
+  if (!pinned || !runs.some(r => r.id === selected)) selected = runs.length ? runs[0].id : null;
   renderFeed();
-  const run = runs.find(r => r.id === selected) || runs[0] || null;
-  if (run) selected = run.id;
+  const run = runs.find(r => r.id === selected) || null;
   renderFocus(run); renderWhy(run);
+  const live = $("liveTag");
+  if (live) {
+    live.textContent = pinned ? "showing a pinned check" : "showing the latest check";
+    live.className = "pill " + (pinned ? "warn" : "ok");
+  }
 }
 async function refresh() {
   try {
@@ -678,7 +694,7 @@ $("btnAnalyze").onclick = async () => {
     const r = await fetch("/api/analyze", { method:"POST", body: fd });
     if (!r.ok) throw new Error("status " + r.status);
     const d = await r.json();
-    showErr(""); selected = d.run_id; await refresh(); show("det");
+    showErr(""); selected = d.run_id; pinned = false; await refresh(); show("det");
   } catch (e) { showErr("Could not check that: " + e.message); }
   finally { btn.disabled = false; btn.textContent = "Check it"; }
 };
