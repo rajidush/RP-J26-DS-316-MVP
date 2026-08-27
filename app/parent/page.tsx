@@ -301,14 +301,14 @@ export default function ParentDashboard() {
   // Dynamic Socratic Emotion Trendpoints
   const getEmotionTrendPoints = () => {
     if (!backendAvailable || !backendData) return null;
-    const sessions = [...backendData.socratic_sessions]
-      .filter(s => s.child_age === activePersona.age)
+    const completedSessions = [...backendData.socratic_sessions]
+      .filter(s => s.child_age === activePersona.age && s.completed)
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-    // 1. Group all turns by day string (e.g. "18 Aug")
-    const dayGroups: { [dateStr: string]: { positive: number; neutral: number; negative: number; dateObj: Date } } = {};
+    // 1. Group completed sessions by day string (e.g. "18 Aug") and get the latest session's final turn emotion
+    const dayGroups: { [dateStr: string]: { emotion: string; dateObj: Date } } = {};
 
-    sessions.forEach(session => {
+    completedSessions.forEach(session => {
       if (!session.timestamp) return;
       const date = new Date(session.timestamp);
       if (isNaN(date.getTime())) return;
@@ -317,29 +317,21 @@ export default function ParentDashboard() {
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const dateStr = `${day} ${monthNames[date.getMonth()]}`;
 
-      if (!dayGroups[dateStr]) {
-        dayGroups[dateStr] = { positive: 0, neutral: 0, negative: 0, dateObj: date };
-      }
+      // Get final turn's emotion of this completed session
+      const turns = session.turns || [];
+      const latestTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+      if (!latestTurn) return;
 
-      (session.turns || []).forEach((turn: any) => {
-        const emo = (turn.child_emotion || "").toLowerCase();
-        if (!emo || emo === "none") return;
-
-        if (["resolved", "compliant", "happy", "reflective", "curious", "positive"].includes(emo)) {
-          dayGroups[dateStr].positive++;
-        } else if (["scared", "defensive", "frustrated", "angry", "negative"].includes(emo)) {
-          dayGroups[dateStr].negative++;
-        } else if (["neutral", "unknown", "unclear"].includes(emo)) {
-          dayGroups[dateStr].neutral++;
-        }
-      });
+      const emo = (latestTurn.child_emotion || "neutral").toLowerCase();
+      // Overwrite to keep the emotion from the most recently completed session of the day
+      dayGroups[dateStr] = { emotion: emo, dateObj: date };
     });
 
     const sortedDateStrs = Object.keys(dayGroups).sort((a, b) => {
       return dayGroups[a].dateObj.getTime() - dayGroups[b].dateObj.getTime();
     });
 
-    // Limit to the last 7 days of historical data
+    // Limit to the last 7 days of completed historical data
     const last7Days = sortedDateStrs.slice(-7);
 
     if (last7Days.length === 0) return null;
@@ -370,26 +362,18 @@ export default function ParentDashboard() {
 
     const points = last7Days.map((dateStr, idx) => {
       const group = dayGroups[dateStr];
-      let dominant: "positive" | "neutral" | "negative" = "neutral";
-      
-      if (group.positive > group.neutral && group.positive > group.negative) {
-        dominant = "positive";
-      } else if (group.negative > group.positive && group.negative > group.neutral) {
-        dominant = "negative";
-      } else if (group.positive === group.negative && group.positive > 0) {
-        dominant = "neutral";
-      }
+      const emo = group.emotion;
 
       const x = last7Days.length > 1
         ? 10 + idx * (280 / (last7Days.length - 1))
         : 150;
-      const y = emotionToY(dominant);
+      const y = emotionToY(emo);
 
       return {
         x,
         y,
-        color: emotionToColor(dominant),
-        emotion: dominant.charAt(0).toUpperCase() + dominant.slice(1),
+        color: emotionToColor(emo),
+        emotion: emo.charAt(0).toUpperCase() + emo.slice(1),
         timeStr: dateStr
       };
     });
