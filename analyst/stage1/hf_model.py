@@ -187,6 +187,23 @@ class HfTextClassifier:
             return None, None
         return hate_score_from_labels(rows), category_from_labels(rows)
 
+    def read(self, text: str) -> tuple[Optional[float], Optional[str], Dict[str, float]]:
+        """Score, category and the raw labels behind them, from one forward pass.
+
+        The panel shows the labels as evidence ("why did it say that"), so they
+        must come from the same inference that produced the score — asking the
+        model twice could show a reader labels that never drove the decision.
+        """
+        rows = self.label_scores(text)
+        if not rows:
+            return None, None, {}
+        ranked = sorted(rows, key=lambda r: float(r.get("score") or 0.0), reverse=True)
+        labels = {
+            normalize_label(r.get("label")): round(float(r.get("score") or 0.0), 4)
+            for r in ranked[:3]
+        }
+        return hate_score_from_labels(rows), category_from_labels(rows), labels
+
     def top_labels(self, text: str, limit: int = 3) -> Dict[str, float]:
         """Evidence for the panel — what the model actually said."""
         rows = self.label_scores(text)

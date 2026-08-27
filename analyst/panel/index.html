@@ -390,8 +390,14 @@ function renderDetail(run) {
   let evidence = bar("Word & phrase rules", lex,
     lex >= 0.5 ? "Matched a known harmful phrase." : "No harmful phrase matched.");
   if (mod != null) {
+    /* Show the labels the model actually emitted, not just the collapsed
+       score — "why did it say that" is the whole point of this panel. */
+    const labels = ev.model_labels || {};
+    const shown = Object.keys(labels).slice(0, 3)
+      .map(k => `${esc(k.replace(/_/g, " "))} ${num(labels[k])}`).join(" · ");
     evidence += bar("Language model", mod,
-      mod >= 0.5 ? "The model judged this language harmful." : "The model did not judge this harmful.");
+      (mod >= 0.5 ? "The model judged this language harmful." : "The model did not judge this harmful.")
+      + (shown ? "  Read as: " + shown : ""));
   } else if (lex >= 0.88) {
     /* Not an omission: the rules already matched at full confidence, so the
        model was skipped on purpose. Saying nothing here reads as a failure. */

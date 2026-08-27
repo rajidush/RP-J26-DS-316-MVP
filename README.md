@@ -113,15 +113,32 @@ app/                     Shared Next.js sandbox for C3/C4 demo UI — not C2 det
 
 ### Measured accuracy (CPU, persona 8–10)
 
-| Scorer | dev set | held-out | held-out recall |
-|---|---|---|---|
-| Previous default (`toxic-comment-model`) | 58.2% | 50.0% | 5.0% |
-| Lexicon only | 94.0% | 52.5% | 5.0% |
-| **Shipped cascade** | 100.0% | **67.5%** | **40.0%** |
+On **published benchmarks**, test splits, out-of-domain for both model heads:
 
-The dev set designed the lexicon patterns, so only the held-out column speaks
-to generalisation — see [`analyst/evaluation/README.md`](analyst/evaluation/README.md)
-for the honest reading, including the buckets that still score 0%.
+| Corpus (test split) | Accuracy | Recall | Threat recall | False positives |
+|---|---|---|---|---|
+| Berkeley — Measuring Hate Speech | 75.9% | 90.8% | **92%** | 39.0% |
+| Davidson 2017 (Twitter) | 87.7% | 94.6% | — | 15.5% |
+
+Jigsaw is deliberately **absent from this table**: `unitary/toxic-bert`, one of
+the two Stage-1 heads, was trained on it, so its 96.7% is a memory check rather
+than a generalisation result. It stays available via `--corpus jigsaw:test` for
+comparing other models.
+
+On the in-house sets, which catch child-specific regressions rather than prove
+skill:
+
+| Scorer | dev set | held-out |
+|---|---|---|
+| Previous default (`toxic-comment-model`) | 58.2% | 50.0% |
+| Lexicon only | 94.0% | 52.5% |
+| **Shipped cascade** | 100.0% | 62.5% |
+
+The dev set designed the lexicon patterns, so it measures fit, not skill.
+Recall is strong; **over-flagging on adult platform speech is the real
+weakness**. See [`analyst/evaluation/README.md`](analyst/evaluation/README.md)
+for split discipline, the Jigsaw contamination, why "not hate speech" is not
+the same as "fine for a child", and how the ensemble rule was chosen.
 
 ---
 

@@ -33,23 +33,42 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from analyst.evaluation import heldout
-from analyst.evaluation.dataset import TextCase, all_cases, buckets
+from analyst.evaluation.dataset import TextCase, all_cases
 
-# Which corpus the harness is pointed at. `dev` designed the detectors, so only
-# `heldout` speaks to generalisation — see heldout.py.
-CORPORA = ("dev", "heldout", "both")
+# Which corpus the harness is pointed at.
+#   dev      designed the detectors — measures fit, not skill
+#   heldout  40 hand-written cases, never tuned on
+#   <name>[:split]  a published corpus (see corpora.py); split defaults to
+#                   `test`, and `train` is the only one safe to tune against
 _active_cases = all_cases
 
 
 def set_corpus(name: str) -> None:
     global _active_cases, _corpus_name
-    _corpus_name = name
+    _corpus_name = name.replace(":", "_")
     if name == "heldout":
         _active_cases = heldout.all_cases
     elif name == "both":
         _active_cases = lambda: [*all_cases(), *heldout.all_cases()]
-    else:
+    elif name == "dev":
         _active_cases = all_cases
+    else:
+        from analyst.evaluation import corpora
+
+        key, _, split = name.partition(":")
+        split = split or "test"
+        if key not in corpora.available():
+            raise SystemExit(
+                f"unknown corpus {key!r}. Built-in: dev, heldout, both. "
+                f"External: {', '.join(corpora.available())} (optionally :train/:dev/:test)"
+            )
+        rows = corpora.load(key, split=split)
+        if not rows:
+            raise SystemExit(
+                f"corpus {key!r} could not be downloaded — check the network, "
+                "or run once online to populate the HuggingFace cache."
+            )
+        _active_cases = lambda: rows
 
 
 def cases():
@@ -444,7 +463,8 @@ def write_report(results: List[Result]) -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description="C2 Analyst accuracy / latency / RAM benchmark")
-    p.add_argument("--corpus", default="dev", choices=CORPORA, help="dev (tuned on) | heldout (never tuned on) | both")
+    p.add_argument("--corpus", default="dev",
+                   help="dev | heldout | both | <name>[:train|dev|test] from corpora.py")
     p.add_argument("--scorer", default="cascade", choices=sorted(SCORERS), help="single scorer to run")
     p.add_argument("--compare", action="store_true", help="run every registered scorer")
     p.add_argument(

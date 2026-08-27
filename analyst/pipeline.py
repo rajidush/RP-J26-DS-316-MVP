@@ -346,6 +346,7 @@ class AnalystPipeline:
             lexicon_hits=list(hits[:10]),
             lexicon_score=round(detail.lexicon_score, 4),
             model_score=detail.model_score,
+            model_labels=dict(detail.model_labels or {}),
             framing_reason=detail.framing_reason,
             score_before_framing=detail.discounted_from,
             vision_calibrated=vision_calibrated,

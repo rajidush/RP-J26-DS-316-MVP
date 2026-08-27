@@ -38,7 +38,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-HATE_GATE = 0.65  # default persona mid; decide.py applies persona thresholds
 TEXT_WEIGHT = 0.60
 VISION_WEIGHT = 0.40
 
@@ -137,23 +136,6 @@ def fuse(text_score: float, vision_score: float, vision_calibrated: bool = True)
             Signal("vision", _clamp(vision_score), vision_calibrated, "vision"),
         ]
     ).fused
-
-
-def fusion_detail(
-    text_score: float,
-    vision_score: float,
-    vision_calibrated: bool = True,
-) -> Dict[str, object]:
-    result = fuse_signals(
-        [
-            Signal("text", _clamp(text_score), True, "text"),
-            Signal("vision", _clamp(vision_score), vision_calibrated, "vision"),
-        ]
-    )
-    out: Dict[str, object] = result.as_dict()
-    out["mode"] = result.mode
-    out["meme_bump"] = result.agreement  # legacy key
-    return out
 
 
 def explain_fusion(

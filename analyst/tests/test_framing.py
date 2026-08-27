@@ -110,6 +110,87 @@ class GamingGuardTests(unittest.TestCase):
                 self.assertFalse(in_gaming_context(text), text)
 
 
+class EnsembleCorroborationTests(unittest.TestCase):
+    """Two heads combined with max() let either one's false positive through.
+
+    On published corpora that was the dominant error source, so a lone,
+    merely-confident head is damped unless the other agrees.
+    """
+
+    def _scores(self, a, b):
+        """Drive TextFast with two stubbed heads and read the model reading."""
+        from analyst.stage1.text_fast import TextFast
+
+        tf = TextFast.__new__(TextFast)          # bypass model loading
+        tf._override = None
+        tf._use_framing = False
+        tf._models = [object(), object()]        # len() == 2 is all that matters
+        tf.name = "stub"
+        tf._read_all = lambda _text: [(a, "bullying", {"toxic": a}), (b, None, {})]
+        return tf._model_reading("some text")[0]
+
+    def test_both_heads_agreeing_is_trusted(self):
+        from analyst.stage1.text_fast import CORROBORATION_FLOOR
+
+        self.assertEqual(self._scores(0.80, CORROBORATION_FLOOR + 0.01), 0.80)
+
+    def test_one_very_confident_head_is_trusted_alone(self):
+        from analyst.stage1.text_fast import SOLO_TRUST
+
+        self.assertEqual(self._scores(SOLO_TRUST + 0.05, 0.01), SOLO_TRUST + 0.05)
+
+    def test_lone_moderately_confident_head_is_damped(self):
+        from analyst.stage1.text_fast import SOLO_DAMP
+
+        got = self._scores(0.80, 0.05)
+        self.assertAlmostEqual(got, round(0.80 * SOLO_DAMP, 4), places=4)
+        self.assertLess(got, 0.80)
+
+    def test_damping_can_drop_a_lone_head_below_the_persona_threshold(self):
+        """The point of the rule: an uncorroborated 0.72 must not alert."""
+        from analyst.decide import PERSONA_THETA2
+
+        self.assertLess(self._scores(0.72, 0.10), PERSONA_THETA2["8-10"])
+
+    def test_a_single_head_setup_is_never_damped(self):
+        from analyst.stage1.text_fast import TextFast
+
+        tf = TextFast.__new__(TextFast)
+        tf._override = None
+        tf._use_framing = False
+        tf._models = [object()]
+        tf.name = "stub"
+        tf._read_all = lambda _t: [(0.72, "bullying", {})]
+        self.assertEqual(tf._model_reading("x")[0], 0.72)
+
+    def test_winning_head_labels_reach_the_score_detail(self):
+        """The labels shown as evidence must come from the head that won.
+
+        This field sat unpopulated for a while because nothing asserted on it.
+        """
+        from analyst.stage1.text_fast import TextFast
+
+        tf = TextFast.__new__(TextFast)
+        tf._override = None
+        tf._use_framing = False
+        tf._models = [object(), object()]
+        tf.name = "stub"
+        tf._read_all = lambda _t: [
+            (0.95, "threat", {"threat": 0.95}),
+            (0.10, None, {"toxic": 0.10}),
+        ]
+        detail = tf.score_detailed("no lexicon hit here at all")
+        self.assertEqual(detail.model_labels, {"threat": 0.95})
+
+    def test_constants_stay_ordered(self):
+        from analyst.stage1.text_fast import (
+            CORROBORATION_FLOOR, SOLO_DAMP, SOLO_TRUST,
+        )
+
+        self.assertLess(CORROBORATION_FLOOR, SOLO_TRUST)
+        self.assertLess(SOLO_DAMP, 1.0)
+
+
 class LexiconRegressionTests(unittest.TestCase):
     def test_hate_all_no_longer_matches_a_food_opinion(self):
         score, category, _hits = score_text("i hate all vegetables honestly")

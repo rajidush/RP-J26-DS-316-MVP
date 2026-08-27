@@ -11,6 +11,7 @@ code — no private path can flatter one of them.
 |---|---|
 | `dataset.py` | **Development set** (68 cases). The detectors were designed against it. |
 | `heldout.py` | **Held-out set** (40 cases). Written after the detectors, never tuned on. |
+| `corpora.py` | **Published benchmarks** — Jigsaw, Davidson, Berkeley. Real data. |
 | `benchmark.py` | The harness. |
 | `accuracy_report_dev.md` | Generated — dev-set results. |
 | `accuracy_report_heldout.md` | Generated — held-out results. **Quote this one.** |
@@ -20,10 +21,53 @@ code — no private path can flatter one of them.
 ## Running it
 
 ```powershell
+python -m analyst.evaluation.benchmark --corpus berkeley:test --scorer cascade
 python -m analyst.evaluation.benchmark --corpus heldout --compare
 python -m analyst.evaluation.benchmark --corpus dev --sweep
-python -m analyst.evaluation.benchmark --corpus heldout --hf unitary/toxic-bert
+python -m analyst.evaluation.benchmark --corpus jigsaw:train --hf unitary/toxic-bert
+python -m analyst.evaluation.corpora        # provenance + class balance
 ```
+
+External corpora download once into the HuggingFace cache and are then offline.
+
+## Split discipline
+
+Splits come from a **hash of the text itself**, not row order or a seed:
+
+```
+sha1(text) % 100    <60 train | 60-79 dev | >=80 test
+```
+
+So a sentence lands in the same split on every machine, at every sample size.
+Tune on `train`, sanity-check on `dev`, and touch `test` only to report a final
+number. Because the assignment is content-derived, this survives re-sampling —
+you cannot accidentally leak a tuned case into `test` by changing `--limit`.
+
+## Two things that will mislead you
+
+**1. `jigsaw:test` is contaminated for our stack.** `unitary/toxic-bert`, one of
+the two Stage-1 heads, was trained on the Jigsaw corpus. Its 96.7% there is a
+memory check, not a generalisation result. Use Jigsaw to compare *other*
+models, or to read threat recall in isolation — never as the headline.
+Berkeley and Davidson are out-of-domain for both heads and are the honest ones.
+
+**2. "Not hate speech" is not the same as "fine for a child."** Berkeley rates
+`hatespeech` on its own rubric, so a row can be labelled not-hate while
+annotators separately rate it 4/4 for insult. Measured on 400 train rows:
+
+| | our "false positives" | rows we cleared |
+|---|---|---|
+| mean insult (0–4) | 2.34 | 1.28 |
+| share rated insult ≥ 3 | **54%** | 21% |
+
+Over half of what the benchmark called a false positive was strongly insulting
+content that a child-safety tool should arguably flag. Those rows are now
+**excluded** rather than counted as benign — the same treatment already given to
+Davidson's "offensive" middle class and Berkeley's "unclear" middle. Correcting
+this alone moved Berkeley from 59.2% to 44.3% false positives with no change to
+the detector.
+
+The remainder is genuine over-flagging, and it is reported as such.
 
 `--compare` runs every registered scorer, `--sweep` prints a threshold sweep,
 `--hf MODEL_ID` benchmarks any HuggingFace text-classification model (repeatable),
@@ -52,17 +96,86 @@ alert teaches the child that ordinary play, or asking an adult for help,
 triggers surveillance. Those buckets are reported separately and are the first
 thing to check after any change.
 
+## How the ensemble rule was chosen
+
+Stage 1 runs two heads. Combining them with `max()` means **either head's false
+positive survives**, and on published corpora that dominated the error budget:
+156 of 165 sampled Berkeley false positives and 65 of 67 Davidson ones came
+from a model, not the lexicon.
+
+Candidate rules, measured on **train** splits only (recall / false-positive rate):
+
+| rule | berkeley | davidson | dev | held-out recall |
+|---|---|---|---|---|
+| `max()` | 94% / 43% | 96% / 18% | 100% / 0% | 40% |
+| **corroboration** | 91% / 36% | 95% / **9%** | 100% / 0% | 30% |
+| `mean` | 81% / 22% | 89% / 6% | 100% / 0% | 10% |
+
+Corroboration ships: trust one head alone at ≥0.90, otherwise require the other
+at ≥0.50, else damp to 70%. Confirmed on the **test** splits afterwards:
+
+| test split | before (`max`) | after (corroboration) |
+|---|---|---|
+| berkeley | 74.4% acc · 93.2% rec · 44.3% FP | **75.9% · 90.8% · 39.0%** |
+| davidson | 81.9% acc · 96.4% rec · 24.8% FP | **87.7% · 94.6% · 15.5%** |
+| dev | 100% · 0% FP | 100% · 0% FP |
+| held-out | 67.5% acc · 40% rec | 62.5% · 30% rec |
+
+Davidson gains 5.8 points of accuracy and loses a third of its false positives.
+The child-specific dev behaviour (gaming, reporting, figurative) is untouched.
+
+The reasoning is product-specific, not a generic preference for precision. The
+cascade re-checks the screen every 2.5 s, so a missed detection gets another
+chance on the next tick, while a false alert interrupts the child immediately
+and teaches them the tool is noise. **Precision has no second chance; recall
+does.** The cost is visible and stated: held-out recall falls 40% → 30% on the
+hand-written implicit cases.
+
 ## Known gaps (measured, not hidden)
 
-Held out, the cascade scores **0% on threats and 0% on sexual harassment**
-phrased in words the patterns do not contain, and 60% on implicit identity
-hate. Both pretrained heads score near zero on implicit peer harm without
-profanity — they are trained on corpora where toxicity correlates with slurs.
+**Correction.** An earlier version of this file reported "0% on threats" from
+the 40-case held-out set. That was wrong as a statement about the product. Those
+four hand-written threats were unusually implicit ("im waiting outside for you
+after class"), and on published threat data the cascade reaches **93–95% threat
+recall**. A 40-case set is a stress test, not a measurement — which is exactly
+why `corpora.py` exists.
 
-That is the empirical case for Milestone A3/A4 fine-tuning: **pretrained hate
-and toxicity models do not transfer to implicit, context-dependent peer harm
-typical of children's interactions.** These numbers are the pretrained baseline
-that fine-tuned models get compared against.
+What is genuinely weak:
+
+- **Over-flagging on adult social media.** Berkeley 44.3% and Davidson 24.8%
+  false positives, driven almost entirely by the model heads (156/165 and 65/67
+  of sampled false positives), not the lexicon. Part is a domain gap — these are
+  adult platforms, not a child's screen — and part is real.
+- **Implicit peer harm without profanity** still scores ~60% on the hand-written
+  held-out set. Both heads are trained where toxicity correlates with slurs.
+- **Grooming / sexual harassment aimed at minors has no public benchmark**, for
+  obvious reasons. That category stays rule-driven and its *recall is
+  unvalidated*. It is stated as a limitation rather than averaged into a
+  headline number.
+
+  Its **precision** is testable, though, and was tested: across 6,823 benign
+  rows from all three corpora the `sexual:coercion` family fired **0 times**.
+  So it does not over-flag; whether it catches real grooming is simply unknown.
+
+### What the pattern layer actually contributes on real data
+
+| family | fires on benign (6,823) | fires on harmful (2,177) |
+|---|---|---|
+| `sexual:coercion` | 0 | 0 |
+| `threat:violence_intent` | 1 | 0 |
+| `threat:intimidation` | 0 | 3 |
+
+The patterns are near-perfectly precise and almost never fire — so the 93–95%
+threat recall comes from the **model heads**, not from the rules. This matches
+the held-out finding that pattern matching memorises phrasings rather than
+generalising. The layer still earns its place: it is auditable, model-free, and
+it is the only thing covering grooming, where no model exists. But it should
+not be credited with the recall numbers.
+
+Together these are the empirical case for Milestone A3/A4: pretrained hate and
+toxicity models transfer poorly to children's language and over-flag adult
+platform speech. These figures are the pretrained baseline that fine-tuned
+models get compared against.
 
 `unalive yourself` in `heldout.py` is a deliberate known failure — platform
 evasion slang the lexicon does not know. It documents a gap rather than hiding

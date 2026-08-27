@@ -223,6 +223,24 @@ Privacy: raw frames/audio stay in RAM then wipe. Panel is localhost-only.
 
 ## Step 6 — Fine-tune + Dataset C (after demo)
 
-- Logistic probe on CLIP embeddings
+- Logistic probe on CLIP embeddings. Until it exists `image_fast` reports
+  `calibrated = False` and is excluded from the fused score — measured, it
+  returns 0.324-0.393 for every image, which is noise.
 - Fusion MLP vs this rule-based head
 - Do not block the live demo on this step
+
+**The pretrained baseline already exists.** `analyst/evaluation/` benchmarks the
+current cascade against Jigsaw, Davidson and Berkeley with content-derived
+train/dev/test splits, so a fine-tuned model has something honest to beat:
+
+```powershell
+python -m analyst.evaluation.benchmark --corpus berkeley:test --scorer cascade
+python -m analyst.evaluation.corpora     # provenance + class balance
+```
+
+Two rules when working on this step:
+
+1. Tune on `:train`, sanity-check on `:dev`, report on `:test`. Splits come from
+   a hash of the text, so they survive re-sampling.
+2. `jigsaw:*` is **contaminated** — `unitary/toxic-bert` was trained on it.
+   Never quote it as a generalisation result for a stack containing that head.

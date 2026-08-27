@@ -17,9 +17,12 @@ Layering, and why each layer is here (all numbers from
                          what do i do") scored 0.88 and would have triggered
                          an intervention against the victim.
 
-The two detectors are combined with max() because they are complementary, not
-redundant: each covers cases the other scores at zero. The framing guard is
-applied *last*, to the combined score, so neither layer can route around it.
+The lexicon and the model layer are combined with max() because they are
+complementary, not redundant: each covers cases the other scores at zero. The
+two *model heads* are combined by corroboration instead — see the constants
+below, where plain max() was measured to dominate the false-positive budget.
+The framing guard is applied *last*, to the combined score, so no layer can
+route around it.
 
 Model choice was measured, not assumed. `martin-ha/toxic-comment-model` (the
 previous default) scored 58.2% accuracy / 18.2% recall and is a generic
@@ -45,10 +48,10 @@ from .lexicon import score_text as lexicon_score
 #   roberta-hate-dynabench   implicit identity hate 40%, bullying  0%
 #   toxic-bert (Jigsaw)      implicit identity hate 20%, bullying 60%
 #
-# They are combined with max() and run concurrently, so the ensemble costs one
-# model's latency rather than two. Override the pair with ANALYST_TEXT_MODEL
-# (primary) and ANALYST_TEXT_MODEL_2 (secondary); set ANALYST_TEXT_MODEL_2=""
-# to run a single head.
+# They run concurrently, so the ensemble costs one model's latency rather than
+# two, and are combined by corroboration (see below). Override the pair with
+# ANALYST_TEXT_MODEL (primary) and ANALYST_TEXT_MODEL_2 (secondary); set
+# ANALYST_TEXT_MODEL_2="" to run a single head.
 DEFAULT_HF_MODEL = "facebook/roberta-hate-speech-dynabench-r4-target"
 DEFAULT_HF_MODEL_2 = "unitary/toxic-bert"
 
@@ -66,6 +69,28 @@ _LEXICON_DECIDES_ALONE = 0.88
 # burning the cascade's whole cost saving on banter. Guarded by a test.
 GAMING_MODEL_CAP = 0.30
 
+# --- Ensemble corroboration -------------------------------------------------
+# Combining the heads with plain max() means *either* head's false positive
+# survives. On published corpora that dominated the error budget: 156 of 165
+# sampled Berkeley false positives and 65 of 67 Davidson ones came from a model
+# rather than the lexicon.
+#
+# Measured on train splits (recall / false-positive rate):
+#
+#                    berkeley        davidson       heldout recall
+#   max()            94% / 43%       96% / 18%           40%
+#   corroboration    91% / 36%       95% /  9%           30%
+#   mean             81% / 22%       89% /  6%           10%
+#
+# Corroboration halves Davidson's false positives for one point of recall.
+# That trade is right for this product specifically: the cascade re-checks the
+# screen every 2.5 s, so a missed detection gets another chance on the next
+# tick, while a false alert interrupts the child immediately and teaches them
+# the tool is noise. Precision has no second chance; recall does.
+SOLO_TRUST = 0.90          # one head this confident is trusted alone
+CORROBORATION_FLOOR = 0.50  # ...otherwise the other head must also agree
+SOLO_DAMP = 0.70            # uncorroborated and merely confident: damp it
+
 
 @dataclass
 class ScoreDetail:
@@ -77,6 +102,7 @@ class ScoreDetail:
     lexicon_score: float = 0.0
     model_score: Optional[float] = None
     model_category: Optional[str] = None
+    model_labels: dict = field(default_factory=dict)
     framing_reason: str = ""
     discounted_from: Optional[float] = None
 
@@ -135,9 +161,9 @@ class TextFast:
         # ~180 ms model call entirely. Explicit abuse is therefore the *cheapest*
         # path through Stage 1, not the most expensive.
         if lex_score >= _LEXICON_DECIDES_ALONE:
-            model_score, model_category = None, None
+            model_score, model_category, model_labels = None, None, {}
         else:
-            model_score, model_category = self._model_reading(text)
+            model_score, model_category, model_labels = self._model_reading(text)
 
         # Competitive trash talk is the models' worst blind spot: toxic-bert
         # scored "you're trash at this game lol" 0.93 and "im gonna kill you in
@@ -167,6 +193,7 @@ class TextFast:
             lexicon_score=round(lex_score, 4),
             model_score=model_score,
             model_category=model_category,
+            model_labels=model_labels,
         )
 
         if self._use_framing:
@@ -184,57 +211,63 @@ class TextFast:
 
         return detail
 
-    def model_labels(self, text: str) -> dict:
-        """Raw model labels — panel evidence for 'why did it say that'."""
-        if self._model is None:
-            return {}
-        return self._model.top_labels(text)
+    # A model_labels() method used to live here and ran the model a second
+    # time. Labels now ride along on ScoreDetail from the same forward pass
+    # that produced the score, so the panel cannot be shown labels that did
+    # not actually drive the decision.
 
     # -- internals ------------------------------------------------------------
 
-    def _model_reading(self, text: str) -> Tuple[Optional[float], Optional[str]]:
-        """Highest hate score across the ensemble, with that head's category.
+    def _model_reading(self, text: str) -> Tuple[Optional[float], Optional[str], dict]:
+        """Ensemble reading: highest head score, damped when uncorroborated.
 
-        max() rather than an average: the heads are complementary, so a case
-        one of them understands must not be diluted by the other's ignorance.
-        The cost is that either head's false positive survives — which is why
-        both were checked for false positives before being combined (roberta 1,
-        toxic-bert 0 on the held-out set).
+        An average would dilute a case only one head understands, so the base
+        is still the maximum. But a lone head that is merely confident is not
+        trustworthy out-of-domain, so it is damped unless the other head also
+        sees harm — see SOLO_TRUST / CORROBORATION_FLOOR / SOLO_DAMP.
         """
         if not (text or "").strip():
-            return None, None
+            return None, None, {}
         if self._override is not None:
             try:
-                return float(self._override(text)), None
+                return float(self._override(text)), None, {}
             except Exception:
-                return None, None
+                return None, None, {}
         if not self._models:
-            return None, None
+            return None, None, {}
 
         readings = self._read_all(text)
         if not readings:
-            return None, None
-        best_score, best_category = max(readings, key=lambda pair: pair[0])
+            return None, None, {}
         if self.name == "lexicon":
             self.name = self._describe()  # heads load lazily on first use
-        return best_score, best_category
 
-    def _read_all(self, text: str) -> List[Tuple[float, Optional[str]]]:
+        best_score, best_category, best_labels = max(readings, key=lambda r: r[0])
+        if len(readings) < 2:
+            return best_score, best_category, best_labels
+
+        lowest = min(r[0] for r in readings)
+        if best_score >= SOLO_TRUST or lowest >= CORROBORATION_FLOOR:
+            return best_score, best_category, best_labels
+        # One head alone, only moderately confident: damp rather than trust.
+        return round(best_score * SOLO_DAMP, 4), best_category, best_labels
+
+    def _read_all(self, text: str) -> List[Tuple[float, Optional[str], dict]]:
         if len(self._models) == 1:
             return self._read_one(self._models[0], text)
         # Concurrent: the heads are independent and each is dominated by its
         # own forward pass, so the ensemble costs ~one model's wall time.
         with ThreadPoolExecutor(max_workers=len(self._models)) as pool:
             futures = [pool.submit(self._read_one, m, text) for m in self._models]
-            out: List[Tuple[float, Optional[str]]] = []
+            out: List[Tuple[float, Optional[str], dict]] = []
             for future in futures:
                 out.extend(future.result())
         return out
 
     @staticmethod
-    def _read_one(model: HfTextClassifier, text: str) -> List[Tuple[float, Optional[str]]]:
+    def _read_one(model: HfTextClassifier, text: str) -> List[Tuple[float, Optional[str], dict]]:
         try:
-            score, category = model.score_and_category(text)
+            score, category, labels = model.read(text)
         except Exception:
             return []
-        return [(float(score), category)] if score is not None else []
+        return [(float(score), category, labels)] if score is not None else []

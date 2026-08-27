@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
@@ -38,7 +38,13 @@ class Envelope(BaseModel):
 
 
 class FrameCaptured(BaseModel):
-    """C1 → C2. Until C1 exists, replay / CLI builds this locally."""
+    """C1 → C2 bus contract (Engineering Plan §2.4).
+
+    NOT YET WIRED. C1 does not exist, so nothing in this repo constructs or
+    consumes it — `capture/worker.py` produces JPEG bytes directly and
+    `--replay` reads from disk. It is kept because it is the *interface spec*
+    C1 will be built against; delete it only if that integration is dropped.
+    """
 
     monitor: int = 0
     w: int = 0
@@ -49,15 +55,6 @@ class FrameCaptured(BaseModel):
     fg_rect: Optional[List[int]] = None
     fg_exe: str = "unknown"
     reason: Literal["scene_change", "heartbeat", "replay", "manual"] = "manual"
-
-
-class SpeechSegment(BaseModel):
-    """Internal C2 audio segment after VAD (or whole clip in MVP)."""
-
-    pcm_or_file_bytes: bytes
-    sample_rate: int = 16000
-    duration_s: float = 0.0
-    source: Literal["loopback", "file", "mic_opt_in"] = "file"
 
 
 class Modalities(BaseModel):

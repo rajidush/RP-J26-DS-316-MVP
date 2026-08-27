@@ -19,6 +19,8 @@ analyst/models/*.bin
 analyst/models/*.pt
 analyst/models/*.gguf
 analyst/evaluation/demo_e2e_report.md
+analyst/evaluation/accuracy_report_*.md
+analyst/evaluation/.cache/
 analyst/data/
 **/dashboard_history.json
 
