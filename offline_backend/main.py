@@ -1,12 +1,13 @@
 import os
 import uuid
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from socratic_agent import SocraticAgentManager
 import dashboard_store
 import analyst_bridge
+import tts_engine
 
 
 app = FastAPI(
@@ -111,6 +112,11 @@ class DialogueTurnResponse(BaseModel):
     current_phase: str
     completed: bool
 
+class TTSSynthesizeRequest(BaseModel):
+    text: str = Field(..., description="Text content to speak aloud to the child.")
+    child_age: int = Field(10, description="Age of the child to select appropriate persona voice.")
+    voice: Optional[str] = Field(None, description="Optional explicit voice override.")
+
 # --- Endpoints ---
 
 @app.get("/")
@@ -122,6 +128,34 @@ def read_root():
         "model": agent_manager.model_name,
         "note": "C2 Analyst lives in repo-root /analyst (python -m analyst). This service is C3/C4 demo API.",
     }
+
+
+@app.post("/api/tts/synthesize")
+async def synthesize_neural_speech(payload: TTSSynthesizeRequest):
+    """
+    Synthesizes natural, human-like neural audio via Edge-TTS and returns MP3 audio stream.
+    """
+    try:
+        audio_bytes = await tts_engine.synthesize_speech(
+            text=payload.text,
+            child_age=payload.child_age,
+            voice=payload.voice
+        )
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Empty text provided for synthesis.")
+        
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "inline; filename=socratic_speech.mp3",
+                "Cache-Control": "public, max-age=3600"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
 
 
 @app.post("/api/perception/trigger", response_model=ThreatTriggerResponse)
@@ -215,7 +249,7 @@ def trigger_threat(payload: ThreatTriggerRequest):
     import json
     initial_payload = {
         "socratic_response_to_child": initial_question,
-        "child_emotion": "neutral",
+        "child_emotion": "Neutral",
         "agreed_to_boundary": False
     }
     session_state["history"].append({
@@ -228,7 +262,7 @@ def trigger_threat(payload: ThreatTriggerRequest):
         session_id=session_id,
         child_response="",
         socratic_response_to_child=initial_question,
-        child_emotion="neutral",
+        child_emotion="Neutral",
         agreed_to_boundary=False,
         current_phase="Acknowledge",
         completed=False
@@ -248,6 +282,17 @@ def trigger_threat(payload: ThreatTriggerRequest):
         child_safe_summary=verdict["child_safe_summary"] if from_analyst else "",
     )
 
+def map_emotion(raw_emotion: str) -> str:
+    if not raw_emotion:
+        return "Neutral"
+    emo = raw_emotion.lower().strip()
+    if emo in ["resolved", "compliant", "happy", "reflective", "curious", "positive"]:
+        return "Positive"
+    elif emo in ["scared", "defensive", "frustrated", "angry", "negative"]:
+        return "Negative"
+    else:
+        return "Neutral"
+
 @app.post("/api/dialogue/turn", response_model=DialogueTurnResponse)
 def execute_dialogue_turn(payload: DialogueTurnRequest):
     """
@@ -259,14 +304,14 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
         raise HTTPException(status_code=404, detail="Socratic safety session not found or expired.")
 
     if session["completed"]:
-        last_emotion = "neutral"
+        last_emotion = "Neutral"
         data = dashboard_store.get_dashboard_data()
         for s in data.get("socratic_sessions", []):
             if s.get("session_id") == payload.session_id:
                 turns = s.get("turns", [])
                 for turn in reversed(turns):
                     if turn.get("child_emotion"):
-                        last_emotion = turn["child_emotion"]
+                        last_emotion = map_emotion(turn["child_emotion"])
                         break
                 break
         return DialogueTurnResponse(
@@ -282,11 +327,12 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
             session_id=payload.session_id,
             child_response=payload.child_response
         )
+        mapped_emotion = map_emotion(result["child_emotion"])
         dashboard_store.add_socratic_turn(
             session_id=payload.session_id,
             child_response=payload.child_response,
             socratic_response_to_child=result["socratic_response_to_child"],
-            child_emotion=result["child_emotion"],
+            child_emotion=mapped_emotion,
             agreed_to_boundary=result["agreed_to_boundary"],
             current_phase=result["state_info"]["next_phase"],
             completed=result["state_info"]["completed"]
@@ -296,7 +342,7 @@ def execute_dialogue_turn(payload: DialogueTurnRequest):
 
     return DialogueTurnResponse(
         socratic_response_to_child=result["socratic_response_to_child"],
-        child_emotion=result["child_emotion"],
+        child_emotion=mapped_emotion,
         agreed_to_boundary=result["agreed_to_boundary"],
         current_phase=result["state_info"]["next_phase"],
         completed=result["state_info"]["completed"]

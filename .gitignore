@@ -29,3 +29,6 @@ offline_backend/dashboard_history.json
 .agents/
 SYSTEM_FUNCTIONALITY_REPORT.md
 analyst/models/probe_embeddings.npz
+
+# TypeScript incremental build cache
+*.tsbuildinfo

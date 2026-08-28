@@ -9,3 +9,4 @@ opencv-python-headless>=4.8.0.0,<5.0.0
 numpy>=1.22.0
 mss>=9.0.0
 onnxruntime>=1.15.0
+edge-tts>=6.1.0
