@@ -13,9 +13,12 @@ from typing import List, Dict, Optional, Tuple
 class ZeroTrustGuard:
     def __init__(self):
         self.is_monitoring = False
-        self.simulation_mode = True  # Default to simulation mode for instant, robust demo
+        self.simulation_mode = False  # Default to live mode for real-time monitoring
         self.monitoring_thread: Optional[threading.Thread] = None
         self.lock = threading.Lock()
+        
+        # Absolute folder path inside offline_backend
+        self.captured_frames_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captured_frames")
         
         # State variables
         self.current_processes: List[Dict] = []
@@ -100,6 +103,7 @@ class ZeroTrustGuard:
                     pass
                 self.sct = None
             print("Zero-Trust Guard background thread stopped.")
+        self._cleanup_clean_frames()
 
     def set_simulation_mode(self, mode: bool):
         with self.lock:
@@ -116,19 +120,27 @@ class ZeroTrustGuard:
 
     def _cleanup_clean_frames(self):
         with self.lock:
-            retained_frames = []
+            # Delete session registered frames
             for item in self.session_captured_frames:
                 path = item["path"]
-                if not item["threat_detected"]:
-                    try:
-                        if os.path.exists(path):
-                            os.remove(path)
-                            print(f"Deleted clean frame: {path}")
-                    except Exception as e:
-                        print(f"Failed to delete clean frame {path}: {e}")
-                else:
-                    retained_frames.append(item)
-            self.session_captured_frames = retained_frames
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                        print(f"Deleted session frame: {path}")
+                except Exception as e:
+                    print(f"Failed to delete frame {path}: {e}")
+            self.session_captured_frames = []
+
+            # Purge any remaining files inside the directory, but keep the directory itself
+            try:
+                if os.path.exists(self.captured_frames_dir):
+                    for fname in os.listdir(self.captured_frames_dir):
+                        fpath = os.path.join(self.captured_frames_dir, fname)
+                        if os.path.isfile(fpath):
+                            os.remove(fpath)
+                            print(f"Purged file from directory: {fpath}")
+            except Exception as e:
+                print(f"Failed to purge captured_frames directory: {e}")
 
     def reset(self):
         self._cleanup_clean_frames()
@@ -214,11 +226,11 @@ class ZeroTrustGuard:
 
     def _save_captured_frame(self, frame) -> str:
         try:
-            os.makedirs("./captured_frames", exist_ok=True)
+            os.makedirs(self.captured_frames_dir, exist_ok=True)
             timestamp = time.strftime("frame_%Y%m%d_%H%M%S")
             timestamp_ms = int((time.time() - int(time.time())) * 1000)
             filename = f"{timestamp}_{timestamp_ms}.jpg"
-            filepath = os.path.join("./captured_frames", filename)
+            filepath = os.path.join(self.captured_frames_dir, filename)
             cv2.imwrite(filepath, frame)
             with self.lock:
                 self.session_captured_frames.append({
