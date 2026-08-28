@@ -1,12 +1,13 @@
 import os
 import uuid
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from socratic_agent import SocraticAgentManager
 import dashboard_store
 import analyst_bridge
+import tts_engine
 
 
 app = FastAPI(
@@ -76,6 +77,11 @@ class DialogueTurnResponse(BaseModel):
     current_phase: str
     completed: bool
 
+class TTSSynthesizeRequest(BaseModel):
+    text: str = Field(..., description="Text content to speak aloud to the child.")
+    child_age: int = Field(10, description="Age of the child to select appropriate persona voice.")
+    voice: Optional[str] = Field(None, description="Optional explicit voice override.")
+
 # --- Endpoints ---
 
 @app.get("/")
@@ -87,6 +93,34 @@ def read_root():
         "model": agent_manager.model_name,
         "note": "C2 Analyst lives in repo-root /analyst (python -m analyst). This service is C3/C4 demo API.",
     }
+
+
+@app.post("/api/tts/synthesize")
+async def synthesize_neural_speech(payload: TTSSynthesizeRequest):
+    """
+    Synthesizes natural, human-like neural audio via Edge-TTS and returns MP3 audio stream.
+    """
+    try:
+        audio_bytes = await tts_engine.synthesize_speech(
+            text=payload.text,
+            child_age=payload.child_age,
+            voice=payload.voice
+        )
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Empty text provided for synthesis.")
+        
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "inline; filename=socratic_speech.mp3",
+                "Cache-Control": "public, max-age=3600"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
 
 
 @app.post("/api/perception/trigger", response_model=ThreatTriggerResponse)
