@@ -94,6 +94,7 @@ class ZeroTrustGuard:
                 print("Zero-Trust Guard background thread started.")
 
     def stop(self):
+        thread_to_join = None
         with self.lock:
             self.is_monitoring = False
             if self.sct:
@@ -102,7 +103,24 @@ class ZeroTrustGuard:
                 except Exception:
                     pass
                 self.sct = None
+            self.last_frame_b64 = ""
+            self.threat_score = 0.0
+            self.threat_type = "none"
+            self.detected_objects = []
+            self.nsfw_score = 0.0
+            self.violence_score = 0.0
+            self.weapons_score = 0.0
+            self.scene_change_percentage = 0.0
+            thread_to_join = self.monitoring_thread
+            self.monitoring_thread = None
             print("Zero-Trust Guard background thread stopped.")
+            
+        if thread_to_join and thread_to_join.is_alive() and threading.current_thread() != thread_to_join:
+            try:
+                thread_to_join.join(timeout=2.0)
+            except Exception:
+                pass
+
         self._cleanup_clean_frames()
 
     def set_simulation_mode(self, mode: bool):
@@ -225,6 +243,9 @@ class ZeroTrustGuard:
             return None
 
     def _save_captured_frame(self, frame) -> str:
+        with self.lock:
+            if not self.is_monitoring:
+                return ""
         try:
             os.makedirs(self.captured_frames_dir, exist_ok=True)
             timestamp = time.strftime("frame_%Y%m%d_%H%M%S")
@@ -233,6 +254,13 @@ class ZeroTrustGuard:
             filepath = os.path.join(self.captured_frames_dir, filename)
             cv2.imwrite(filepath, frame)
             with self.lock:
+                if not self.is_monitoring:
+                    try:
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
+                    except Exception:
+                        pass
+                    return ""
                 self.session_captured_frames.append({
                     "path": filepath,
                     "threat_detected": False
@@ -385,6 +413,9 @@ class ZeroTrustGuard:
         Decodes base64 frames from custom video portals, runs a tri-model ONNX execution,
         records processing latency, gathers telemetry, and saves frames exactly every 2 seconds.
         """
+        with self.lock:
+            if not self.is_monitoring:
+                return self.get_state()
         self.last_custom_frame_time = time.time()
         try:
             # 1. Decode base64 frame to OpenCV image
@@ -582,6 +613,8 @@ class ZeroTrustGuard:
 
     def _run_simulation_step(self):
         with self.lock:
+            if not self.is_monitoring:
+                return
             # Retrieve simulation frame based on step
             template = self.sim_templates[self.sim_step % len(self.sim_templates)]
             self.sim_step += 1
@@ -628,6 +661,9 @@ class ZeroTrustGuard:
             )
 
     def _run_live_step(self):
+        with self.lock:
+            if not self.is_monitoring:
+                return
         # 1. Scan running system processes
         processes = self._scan_processes()
         playback = self._detect_playback(processes)
@@ -639,7 +675,13 @@ class ZeroTrustGuard:
             self._prev_smtc_title = title
 
         # 2. Capture a frame using local grabber helper
+        with self.lock:
+            if not self.is_monitoring:
+                return
         frame = self._capture_and_scene_change()
+        with self.lock:
+            if not self.is_monitoring:
+                return
         
         if frame is not None:
             # Save the captured frame locally
