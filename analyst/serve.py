@@ -129,6 +129,24 @@ def api_whitebox() -> dict:
     return worker.whitebox()
 
 
+class PreviewBody(BaseModel):
+    blurred: bool = True
+    width: Optional[int] = None
+
+
+@app.post("/api/preview")
+def api_preview(body: PreviewBody) -> dict:
+    """Flip preview privacy without restarting.
+
+    Only affects frames captured from now on — rows already stored keep the
+    preview written at the time, because the source frame was wiped after that
+    tick and cannot be re-rendered.
+    """
+    from analyst.store import persist as _persist
+
+    return _persist.set_preview_mode(body.blurred, body.width)
+
+
 @app.get("/api/status")
 def api_status() -> dict:
     from analyst.store import persist as _persist

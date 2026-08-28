@@ -43,9 +43,30 @@ def redact_snippet(text: str, limit: int = 200) -> str:
 THUMB_WIDTH = int(os.environ.get("ANALYST_THUMB_WIDTH", "320"))
 THUMB_BLUR = float(os.environ.get("ANALYST_THUMB_BLUR", "8"))
 
+# Blur radius used when previews are switched back on. Kept separate from
+# THUMB_BLUR so toggling to visible and back restores the original strength
+# rather than a hardcoded guess.
+_BLUR_STRENGTH = THUMB_BLUR if THUMB_BLUR > 0 else 8.0
+_SHARP_WIDTH = 1100
+_BLURRED_WIDTH = 320
+
 
 def previews_are_blurred() -> bool:
     return THUMB_BLUR > 0
+
+
+def set_preview_mode(blurred: bool, width: Optional[int] = None) -> dict:
+    """Switch preview privacy at runtime.
+
+    The env vars set the *starting* mode; this lets the panel flip it without a
+    restart, which is what the demo actually needs. Only frames captured after
+    the switch are affected — an existing row keeps whatever preview was written
+    at the time, because the original frame is long gone from memory.
+    """
+    global THUMB_BLUR, THUMB_WIDTH
+    THUMB_BLUR = _BLUR_STRENGTH if blurred else 0.0
+    THUMB_WIDTH = int(width) if width else (_BLURRED_WIDTH if blurred else _SHARP_WIDTH)
+    return {"blurred": previews_are_blurred(), "width": THUMB_WIDTH}
 
 
 def make_blurred_thumb(

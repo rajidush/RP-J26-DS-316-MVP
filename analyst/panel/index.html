@@ -271,7 +271,10 @@ button.btn.primary:hover:not(:disabled){filter:brightness(1.08)}
     <section role="tabpanel" id="p-det" aria-labelledby="t-det" hidden>
       <div class="head"><h1>Detections</h1>
         <p>Where the engine looked on screen, what it read there, and why that produced this score.</p></div>
-      <p class="proto" id="previewNote"></p>
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+        <p class="proto" id="previewNote" style="flex:1;min-width:260px;margin:0 0 18px"></p>
+        <button id="btnPreview" class="btn" type="button" style="flex:none">Show screen</button>
+      </div>
       <div class="panel">
         <h2 style="display:flex;justify-content:space-between;align-items:center;gap:10px">
           Where the engine looked
@@ -627,6 +630,13 @@ $("examples").querySelectorAll("button[data-ex]").forEach(b => b.onclick = () =>
    different things about what the database holds. */
 function renderPreviewNote(p) {
   const el = $("previewNote");
+  const btn = $("btnPreview");
+  if (btn) {
+    // Label says what the click will DO, not what the state currently is —
+    // a toggle labelled with its own state is the classic ambiguity.
+    btn.textContent = p.blurred === false ? "Blur screen" : "Show screen";
+    btn.className = "btn" + (p.blurred === false ? "" : " primary");
+  }
   if (p.blurred === false) {
     el.innerHTML = `<strong style="color:var(--warn)">Demo mode — previews are not blurred.</strong>
       Screenshots are stored at ${esc(String(p.width || "?"))} px and are readable, so this database
@@ -689,6 +699,21 @@ $("btnStop").onclick = async () => {
   try { await api("/api/capture/stop", { method:"POST" }); refresh(); }
   catch (e) { showErr("Could not stop monitoring: " + e.message); }
 };
+$("btnPreview").onclick = async () => {
+  const btn = $("btnPreview"), makeBlurred = btn.textContent.startsWith("Blur");
+  btn.disabled = true;
+  try {
+    await api("/api/preview", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ blurred: makeBlurred }) });
+    await refresh();
+    showErr(makeBlurred
+      ? "Previews are blurred again. Run a new check to see it — earlier rows keep the preview stored at the time."
+      : "Previews are now readable. Run a new check to see it — earlier rows keep the preview stored at the time.");
+    setTimeout(() => showErr(""), 6000);
+  } catch (e) { showErr("Could not switch preview mode: " + e.message); }
+  finally { btn.disabled = false; }
+};
+
 $("btnAnalyze").onclick = async () => {
   const btn = $("btnAnalyze"), t = $("manualText").value.trim();
   const img = $("fImage").files[0], aud = $("fAudio").files[0];
