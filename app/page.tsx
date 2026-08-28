@@ -29,9 +29,16 @@ import {
   Activity,
   Clock,
   Monitor,
-  ExternalLink
+  ExternalLink,
+  Volume2,
+  VolumeX,
+  Mic,
+  MicOff,
+  RotateCcw
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { useSocraticVoice } from "@/hooks/useSocraticVoice";
+import { SocraticAvatarReplica } from "@/app/components/SocraticAvatarReplica";
 
 // Code contents for the Offline Code Hub
 const codeSocraticAgent = `import json
@@ -396,6 +403,9 @@ export default function SocraticPrototype() {
   const [loadingTurn, setLoadingTurn] = useState<boolean>(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
+  // Socratic Voice & Animated Replica Engine
+  const voice = useSocraticVoice({ childAge });
+
   // Auto Scroll Chat Ref
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -480,6 +490,9 @@ export default function SocraticPrototype() {
         setInterceptActive(true);
         setActiveTab("sandbox");
         setLastInterceptionStatus(`ALERT: Analyst → Socratic (${triggerData.threat_type})`);
+        if (triggerData.initial_response) {
+          voice.speak(triggerData.initial_response);
+        }
       } catch {
         // keep UI stable if backend briefly unavailable
       }
@@ -542,6 +555,9 @@ export default function SocraticPrototype() {
                   { role: "assistant", content: JSON.stringify({ socratic_response_to_child: triggerData.initial_response, child_emotion: "neutral", agreed_to_boundary: false }) }
                 ]);
                 setInterceptActive(true);
+                if (triggerData.initial_response) {
+                  voice.speak(triggerData.initial_response);
+                }
               }
             }
           }
@@ -663,6 +679,9 @@ export default function SocraticPrototype() {
                   { role: "assistant", content: JSON.stringify({ socratic_response_to_child: triggerData.initial_response, child_emotion: "neutral", agreed_to_boundary: false }) }
                 ]);
                 setInterceptActive(true);
+                if (triggerData.initial_response) {
+                  voice.speak(triggerData.initial_response);
+                }
               }
             }
           }
@@ -683,6 +702,8 @@ export default function SocraticPrototype() {
 
   const resetGuardSession = async () => {
     try {
+      voice.stopSpeaking();
+      voice.stopListening();
       await fetch(`${BACKEND_URL}/api/guard/reset`, { method: "POST" });
       setInterceptActive(false);
       setIsCompleted(false);
@@ -775,6 +796,9 @@ export default function SocraticPrototype() {
         ]);
         setInterceptActive(true);
         setLastInterceptionStatus(`ALERT: Intercepted ${data.threat_type} locally! Dialog activated.`);
+        if (data.initial_response) {
+          voice.speak(data.initial_response);
+        }
       } else {
         setLastInterceptionStatus("Local API says content is clean (max score <= 0.85).");
       }
@@ -789,6 +813,11 @@ export default function SocraticPrototype() {
   const handleSendDialogue = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!userInput.trim() || loadingTurn) return;
+
+    // Stop listening if mic is still on
+    if (voice.isListening) {
+      voice.stopListening();
+    }
 
     const childText = userInput;
     setUserInput("");
@@ -833,6 +862,9 @@ export default function SocraticPrototype() {
           }) 
         }
       ]);
+      if (data.socratic_response_to_child) {
+        voice.speak(data.socratic_response_to_child);
+      }
     } catch (err: any) {
       console.error(err);
       setApiError(err.message || "Dialogue turn failed.");
@@ -1153,6 +1185,8 @@ export default function SocraticPrototype() {
                   </h3>
                   <button 
                     onClick={() => {
+                      voice.stopSpeaking();
+                      voice.stopListening();
                       setInterceptActive(false);
                       setChatHistory([]);
                       setIsCompleted(false);
@@ -1476,16 +1510,39 @@ export default function SocraticPrototype() {
                           </div>
                         </div>
 
+                        {/* Interactive Socratic Hero Avatar Stage */}
+                        <SocraticAvatarReplica
+                          isSpeaking={voice.isSpeaking}
+                          isListening={voice.isListening}
+                          visemeLevel={voice.visemeLevel}
+                          childAge={childAge}
+                          childEmotion={childEmotion}
+                          loadingTurn={loadingTurn}
+                          isCompleted={isCompleted}
+                          isMuted={voice.isMuted}
+                        />
+
                         {/* Interactive Chat Board area */}
                         <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-4 bg-[#FAF9F6]" id="buddy-chat-history">
                           
                           {/* Socratic Avatar Greeting Bubble */}
                           <div className="flex items-start gap-3" id="buddy-avatar-greeting">
-                            <div className="w-10 h-10 rounded-xl bg-[#5A5A40] flex items-center justify-center font-bold text-white shadow-xs shrink-0">
+                            <div className="w-10 h-10 rounded-xl bg-[#5A5A40] flex items-center justify-center font-bold text-white shadow-xs shrink-0 border border-[#5A5A40] text-xs">
                               SB
                             </div>
-                            <div className="bg-white border border-[#DDE0D0] rounded-xl p-3.5 max-w-[85%] text-[#2D3025] text-xs shadow-xs leading-relaxed">
-                              <span className="font-bold text-[#5A5A40] block mb-1">Socratic Buddy</span>
+                            <div className="bg-white border border-[#DDE0D0] rounded-xl p-3.5 max-w-[85%] text-[#2D3025] text-xs shadow-xs leading-relaxed relative group">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-bold text-[#5A5A40]">Socratic Buddy</span>
+                                <button
+                                  type="button"
+                                  onClick={() => voice.speak("Hi! Socratic Buddy here. Socratic Buddy always protects minors, so I've covered the screen to keep you safe. Don't worry, you aren't in any trouble. Let's talk this through together.")}
+                                  title="Replay greeting voice"
+                                  className="text-[#6B705C] hover:text-[#5A5A40] p-1 rounded hover:bg-[#FAF9F6] transition flex items-center gap-1 text-[10px]"
+                                >
+                                  <Volume2 className="w-3 h-3 text-[#5A5A40]" />
+                                  <span className="hidden sm:inline">Play</span>
+                                </button>
+                              </div>
                               Hi! Socratic Buddy here. Socratic Buddy always protects minors, so I&apos;ve covered the screen to keep you safe. Don&apos;t worry, you aren&apos;t in any trouble. Let&apos;s talk this through together.
                             </div>
                           </div>
@@ -1527,9 +1584,22 @@ export default function SocraticPrototype() {
                                     ? "bg-[#E6D5C3]/20 border-[#DDE0D0] text-[#2D3025]"
                                     : "bg-white border-[#DDE0D0] text-[#2D3025]"
                                 }`}>
-                                  <span className={`font-bold block mb-1 ${item.role === "user" ? "text-[#5A5A40]" : "text-[#5A5A40]"}`}>
-                                    {item.role === "user" ? "My Response" : "Socratic Buddy"}
-                                  </span>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className={`font-bold ${item.role === "user" ? "text-[#5A5A40]" : "text-[#5A5A40]"}`}>
+                                      {item.role === "user" ? "My Response" : "Socratic Buddy"}
+                                    </span>
+                                    {item.role !== "user" && textContent && (
+                                      <button
+                                        type="button"
+                                        onClick={() => voice.speak(textContent)}
+                                        title="Play this message voice"
+                                        className="text-[#6B705C] hover:text-[#5A5A40] p-1 rounded hover:bg-[#FAF9F6] transition flex items-center gap-1 text-[10px]"
+                                      >
+                                        <Volume2 className="w-3 h-3 text-[#5A5A40]" />
+                                        <span className="hidden sm:inline">Play</span>
+                                      </button>
+                                    )}
+                                  </div>
                                   {textContent}
 
                                   {metaInfo && (
@@ -1582,6 +1652,8 @@ export default function SocraticPrototype() {
                               </div>
                               <button
                                 onClick={() => {
+                                  voice.stopSpeaking();
+                                  voice.stopListening();
                                   setInterceptActive(false);
                                   setChatHistory([]);
                                   setIsCompleted(false);
@@ -1600,26 +1672,69 @@ export default function SocraticPrototype() {
                         {/* Input Area */}
                         <form 
                           onSubmit={handleSendDialogue}
-                          className="bg-white border-t border-[#DDE0D0] p-3.5 flex items-center gap-2 shrink-0"
+                          className="bg-white border-t border-[#DDE0D0] p-3.5 flex flex-col gap-2 shrink-0"
                           id="chat-input-form"
                         >
-                          <input 
-                            type="text" 
-                            placeholder="Type your response to Socratic Buddy..."
-                            value={userInput}
-                            onChange={(e) => setUserInput(e.target.value)}
-                            className="flex-1 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg py-2.5 px-3.5 text-xs text-[#2D3025] focus:outline-none focus:border-[#5A5A40] focus:ring-1 focus:ring-[#5A5A40]"
-                            disabled={loadingTurn || isCompleted}
-                            id="input-chat-text"
-                          />
-                          <button
-                            type="submit"
-                            className="p-2.5 rounded-lg bg-[#5A5A40] hover:bg-[#454530] text-white transition flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={!userInput.trim() || loadingTurn || isCompleted}
-                            id="btn-send-chat"
-                          >
-                            <Send className="w-4 h-4" />
-                          </button>
+                          {voice.isListening && (
+                            <div className="flex items-center justify-between px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs animate-pulse">
+                              <span className="flex items-center gap-2 font-medium">
+                                <Mic className="w-3.5 h-3.5 text-emerald-600 animate-bounce" />
+                                Listening to child voice... speak your reply now
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => voice.stopListening()}
+                                className="text-[10px] font-bold uppercase underline hover:text-emerald-950"
+                              >
+                                Stop
+                              </button>
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-2">
+                            {voice.sttSupported && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (voice.isListening) {
+                                    voice.stopListening();
+                                  } else {
+                                    voice.startListening((spokenText) => {
+                                      setUserInput(spokenText);
+                                    });
+                                  }
+                                }}
+                                disabled={loadingTurn || isCompleted}
+                                title={voice.isListening ? "Listening... click to stop" : "Speak your response (Mic)"}
+                                className={`p-2.5 rounded-lg transition flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  voice.isListening
+                                    ? "bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse shadow-md"
+                                    : "bg-[#FAF9F6] border border-[#DDE0D0] hover:bg-[#E6D5C3]/40 text-[#5A5A40]"
+                                }`}
+                                id="btn-voice-mic"
+                              >
+                                <Mic className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            <input 
+                              type="text" 
+                              placeholder={voice.isListening ? "Listening to your voice..." : "Type or speak your response to Socratic Buddy..."}
+                              value={userInput}
+                              onChange={(e) => setUserInput(e.target.value)}
+                              className="flex-1 bg-[#FAF9F6] border border-[#DDE0D0] rounded-lg py-2.5 px-3.5 text-xs text-[#2D3025] focus:outline-none focus:border-[#5A5A40] focus:ring-1 focus:ring-[#5A5A40]"
+                              disabled={loadingTurn || isCompleted}
+                              id="input-chat-text"
+                            />
+                            <button
+                              type="submit"
+                              className="p-2.5 rounded-lg bg-[#5A5A40] hover:bg-[#454530] text-white transition flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                              disabled={!userInput.trim() || loadingTurn || isCompleted}
+                              id="btn-send-chat"
+                            >
+                              <Send className="w-4 h-4" />
+                            </button>
+                          </div>
                         </form>
 
                       </motion.div>

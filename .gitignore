@@ -25,3 +25,5 @@ analyst/data/
 offline_backend/dashboard_history.json
 .agents/
 SYSTEM_FUNCTIONALITY_REPORT.md
+# TypeScript incremental build cache
+*.tsbuildinfo
