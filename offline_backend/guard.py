@@ -85,24 +85,32 @@ class ZeroTrustGuard:
         with self.lock:
             if not self.is_monitoring:
                 self.is_monitoring = True
-                try:
-                    self.sct = mss.mss()
-                except Exception as e:
-                    print(f"Failed to initialize mss screenshot grabber: {e}")
                 self.monitoring_thread = threading.Thread(target=self._monitor_loop, daemon=True)
                 self.monitoring_thread.start()
                 print("Zero-Trust Guard background thread started.")
 
     def stop(self):
+        thread_to_join = None
         with self.lock:
             self.is_monitoring = False
-            if self.sct:
-                try:
-                    self.sct.close()
-                except Exception:
-                    pass
-                self.sct = None
+            self.last_frame_b64 = ""
+            self.threat_score = 0.0
+            self.threat_type = "none"
+            self.detected_objects = []
+            self.nsfw_score = 0.0
+            self.violence_score = 0.0
+            self.weapons_score = 0.0
+            self.scene_change_percentage = 0.0
+            thread_to_join = self.monitoring_thread
+            self.monitoring_thread = None
             print("Zero-Trust Guard background thread stopped.")
+            
+        if thread_to_join and thread_to_join.is_alive() and threading.current_thread() != thread_to_join:
+            try:
+                thread_to_join.join(timeout=2.5)
+            except Exception:
+                pass
+
         self._cleanup_clean_frames()
 
     def set_simulation_mode(self, mode: bool):
@@ -225,6 +233,9 @@ class ZeroTrustGuard:
             return None
 
     def _save_captured_frame(self, frame) -> str:
+        with self.lock:
+            if not self.is_monitoring:
+                return ""
         try:
             os.makedirs(self.captured_frames_dir, exist_ok=True)
             timestamp = time.strftime("frame_%Y%m%d_%H%M%S")
@@ -233,6 +244,13 @@ class ZeroTrustGuard:
             filepath = os.path.join(self.captured_frames_dir, filename)
             cv2.imwrite(filepath, frame)
             with self.lock:
+                if not self.is_monitoring:
+                    try:
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
+                    except Exception:
+                        pass
+                    return ""
                 self.session_captured_frames.append({
                     "path": filepath,
                     "threat_detected": False
@@ -385,6 +403,9 @@ class ZeroTrustGuard:
         Decodes base64 frames from custom video portals, runs a tri-model ONNX execution,
         records processing latency, gathers telemetry, and saves frames exactly every 2 seconds.
         """
+        with self.lock:
+            if not self.is_monitoring:
+                return self.get_state()
         self.last_custom_frame_time = time.time()
         try:
             # 1. Decode base64 frame to OpenCV image
@@ -563,6 +584,12 @@ class ZeroTrustGuard:
             print(f"Failed to load ONNX/Caffe models: {e}. Running in simulation/fallback mode.")
 
     def _monitor_loop(self):
+        sct_local = None
+        try:
+            sct_local = mss.mss()
+        except Exception as e:
+            print(f"Failed to initialize local mss screenshot grabber: {e}")
+
         while True:
             # Check flag under lock
             with self.lock:
@@ -574,14 +601,23 @@ class ZeroTrustGuard:
                 if sim_mode:
                     self._run_simulation_step()
                 else:
-                    self._run_live_step()
+                    self._run_live_step(sct_local)
             except Exception as e:
                 print(f"Error in monitor loop step: {e}")
                 
             time.sleep(2.0) # Scan interval: exactly 2 seconds
 
+        if sct_local:
+            try:
+                sct_local.close()
+                print("Local screen grabber closed.")
+            except Exception:
+                pass
+
     def _run_simulation_step(self):
         with self.lock:
+            if not self.is_monitoring:
+                return
             # Retrieve simulation frame based on step
             template = self.sim_templates[self.sim_step % len(self.sim_templates)]
             self.sim_step += 1
@@ -627,7 +663,10 @@ class ZeroTrustGuard:
                 self.threat_score > 0.75
             )
 
-    def _run_live_step(self):
+    def _run_live_step(self, sct_local=None):
+        with self.lock:
+            if not self.is_monitoring:
+                return
         # 1. Scan running system processes
         processes = self._scan_processes()
         playback = self._detect_playback(processes)
@@ -639,7 +678,13 @@ class ZeroTrustGuard:
             self._prev_smtc_title = title
 
         # 2. Capture a frame using local grabber helper
-        frame = self._capture_and_scene_change()
+        with self.lock:
+            if not self.is_monitoring:
+                return
+        frame = self._capture_and_scene_change(sct_local)
+        with self.lock:
+            if not self.is_monitoring:
+                return
         
         if frame is not None:
             # Save the captured frame locally
@@ -803,14 +848,17 @@ class ZeroTrustGuard:
             "fullscreen_active": fullscreen
         }
 
-    def _capture_and_scene_change(self) -> Optional[np.ndarray]:
+    def _capture_and_scene_change(self, sct_local=None) -> Optional[np.ndarray]:
         try:
-            if not self.sct:
-                self.sct = mss.mss()
+            sct_inst = sct_local
+            should_close = False
+            if not sct_inst:
+                sct_inst = mss.mss()
+                should_close = True
             
             # Grab screenshot of primary monitor
-            monitor = self.sct.monitors[1]
-            screenshot = self.sct.grab(monitor)
+            monitor = sct_inst.monitors[1]
+            screenshot = sct_inst.grab(monitor)
             frame = np.array(screenshot)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
             
@@ -826,6 +874,8 @@ class ZeroTrustGuard:
                 self.scene_change_percentage = 0.0
                 
             self.prev_frame_gray = gray_small
+            if should_close:
+                sct_inst.close()
             return frame
         except Exception as e:
             # Fallback to simulated slight scene changes if no screen recording permission
