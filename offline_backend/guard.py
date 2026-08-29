@@ -85,10 +85,6 @@ class ZeroTrustGuard:
         with self.lock:
             if not self.is_monitoring:
                 self.is_monitoring = True
-                try:
-                    self.sct = mss.mss()
-                except Exception as e:
-                    print(f"Failed to initialize mss screenshot grabber: {e}")
                 self.monitoring_thread = threading.Thread(target=self._monitor_loop, daemon=True)
                 self.monitoring_thread.start()
                 print("Zero-Trust Guard background thread started.")
@@ -97,12 +93,6 @@ class ZeroTrustGuard:
         thread_to_join = None
         with self.lock:
             self.is_monitoring = False
-            if self.sct:
-                try:
-                    self.sct.close()
-                except Exception:
-                    pass
-                self.sct = None
             self.last_frame_b64 = ""
             self.threat_score = 0.0
             self.threat_type = "none"
@@ -117,7 +107,7 @@ class ZeroTrustGuard:
             
         if thread_to_join and thread_to_join.is_alive() and threading.current_thread() != thread_to_join:
             try:
-                thread_to_join.join(timeout=2.0)
+                thread_to_join.join(timeout=2.5)
             except Exception:
                 pass
 
@@ -594,6 +584,12 @@ class ZeroTrustGuard:
             print(f"Failed to load ONNX/Caffe models: {e}. Running in simulation/fallback mode.")
 
     def _monitor_loop(self):
+        sct_local = None
+        try:
+            sct_local = mss.mss()
+        except Exception as e:
+            print(f"Failed to initialize local mss screenshot grabber: {e}")
+
         while True:
             # Check flag under lock
             with self.lock:
@@ -605,11 +601,18 @@ class ZeroTrustGuard:
                 if sim_mode:
                     self._run_simulation_step()
                 else:
-                    self._run_live_step()
+                    self._run_live_step(sct_local)
             except Exception as e:
                 print(f"Error in monitor loop step: {e}")
                 
             time.sleep(2.0) # Scan interval: exactly 2 seconds
+
+        if sct_local:
+            try:
+                sct_local.close()
+                print("Local screen grabber closed.")
+            except Exception:
+                pass
 
     def _run_simulation_step(self):
         with self.lock:
@@ -660,7 +663,7 @@ class ZeroTrustGuard:
                 self.threat_score > 0.75
             )
 
-    def _run_live_step(self):
+    def _run_live_step(self, sct_local=None):
         with self.lock:
             if not self.is_monitoring:
                 return
@@ -678,7 +681,7 @@ class ZeroTrustGuard:
         with self.lock:
             if not self.is_monitoring:
                 return
-        frame = self._capture_and_scene_change()
+        frame = self._capture_and_scene_change(sct_local)
         with self.lock:
             if not self.is_monitoring:
                 return
@@ -845,14 +848,17 @@ class ZeroTrustGuard:
             "fullscreen_active": fullscreen
         }
 
-    def _capture_and_scene_change(self) -> Optional[np.ndarray]:
+    def _capture_and_scene_change(self, sct_local=None) -> Optional[np.ndarray]:
         try:
-            if not self.sct:
-                self.sct = mss.mss()
+            sct_inst = sct_local
+            should_close = False
+            if not sct_inst:
+                sct_inst = mss.mss()
+                should_close = True
             
             # Grab screenshot of primary monitor
-            monitor = self.sct.monitors[1]
-            screenshot = self.sct.grab(monitor)
+            monitor = sct_inst.monitors[1]
+            screenshot = sct_inst.grab(monitor)
             frame = np.array(screenshot)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
             
@@ -868,6 +874,8 @@ class ZeroTrustGuard:
                 self.scene_change_percentage = 0.0
                 
             self.prev_frame_gray = gray_small
+            if should_close:
+                sct_inst.close()
             return frame
         except Exception as e:
             # Fallback to simulated slight scene changes if no screen recording permission
