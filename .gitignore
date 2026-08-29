@@ -18,12 +18,17 @@ analyst/models/*.onnx
 analyst/models/*.bin
 analyst/models/*.pt
 analyst/models/*.gguf
+analyst/models/image_probe.json
 analyst/evaluation/demo_e2e_report.md
+analyst/evaluation/accuracy_report_*.md
+analyst/evaluation/.cache/
 analyst/data/
 **/dashboard_history.json
 
 offline_backend/dashboard_history.json
 .agents/
 SYSTEM_FUNCTIONALITY_REPORT.md
+analyst/models/probe_embeddings.npz
+
 # TypeScript incremental build cache
 *.tsbuildinfo

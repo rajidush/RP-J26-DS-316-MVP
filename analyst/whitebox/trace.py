@@ -48,18 +48,17 @@ def build_trace_from_result(
 
     steps: List[dict] = []
 
-    cap_detail = f"{frame_w}×{frame_h}" if had_frame and frame_w else ("no frame" if not had_frame else "—")
-    if not screen_ok and screen_error:
-        cap_detail = screen_error[:80]
-    steps.append(
-        _step(
-            "capture",
-            "Screen grab",
-            "ok" if had_frame and screen_ok else ("warn" if had_frame else "fail"),
-            capture_ms,
-            cap_detail,
-        )
-    )
+    # No frame is only a failure when a frame was actually expected. A manual
+    # text check has nothing to capture, and reporting that as "fail" made a
+    # perfectly healthy run look broken in the panel.
+    if had_frame:
+        cap_status = "ok" if screen_ok else "warn"
+        cap_detail = f"{frame_w}×{frame_h}" if frame_w else "—"
+    elif screen_error:
+        cap_status, cap_detail = "fail", screen_error[:80]
+    else:
+        cap_status, cap_detail = "skip", "not a screen check"
+    steps.append(_step("capture", "Screen grab", cap_status, capture_ms, cap_detail))
 
     audio_status = "ok" if had_audio else "skip"
     audio_detail = f"{len(result.transcript or '')} chars" if had_audio else "silent"

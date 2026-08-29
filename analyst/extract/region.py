@@ -41,6 +41,10 @@ _PAD_FRAC = 0.02            # breathing room around the crop
 # memes and posters do. Without this floor a plain document reads as a picture
 # and we waste a VLM call on something OCR already handled.
 _MIN_BLOB_SATURATION = 0.12
+# Gallery detection: how many blobs of comparable size mean "grid of pictures"
+# rather than "one picture". See the guard in find_image_region().
+_PEER_SIZE_FRAC = 0.45      # a peer is at least 45% the size of the largest
+_GALLERY_MIN_PEERS = 4      # this many comparable blobs = a gallery
 
 Box = Tuple[int, int, int, int]  # left, top, right, bottom in ORIGINAL pixels
 
@@ -72,11 +76,11 @@ def _cell_scores(rgb: np.ndarray, rows: int, cols: int):
     return out, sat
 
 
-def _largest_blob(hot: np.ndarray) -> Optional[List[Tuple[int, int]]]:
-    """Largest 4-connected component of True cells."""
+def _blobs(hot: np.ndarray) -> List[List[Tuple[int, int]]]:
+    """All 4-connected components of True cells, largest first."""
     rows, cols = hot.shape
     seen = np.zeros_like(hot, dtype=bool)
-    best: List[Tuple[int, int]] = []
+    found: List[List[Tuple[int, int]]] = []
     for r in range(rows):
         for c in range(cols):
             if not hot[r, c] or seen[r, c]:
@@ -92,9 +96,15 @@ def _largest_blob(hot: np.ndarray) -> Optional[List[Tuple[int, int]]]:
                     if 0 <= nr < rows and 0 <= nc < cols and hot[nr, nc] and not seen[nr, nc]:
                         seen[nr, nc] = True
                         q.append((nr, nc))
-            if len(comp) > len(best):
-                best = comp
-    return best or None
+            found.append(comp)
+    found.sort(key=len, reverse=True)
+    return found
+
+
+def _largest_blob(hot: np.ndarray) -> Optional[List[Tuple[int, int]]]:
+    """Largest 4-connected component of True cells."""
+    found = _blobs(hot)
+    return found[0] if found else None
 
 
 def find_image_region(image: Optional[Image.Image]) -> Optional[Box]:
@@ -123,8 +133,23 @@ def find_image_region(image: Optional[Image.Image]) -> Optional[Box]:
         if not hot.any():
             return None
 
-        blob = _largest_blob(hot)
-        if not blob:
+        found = _blobs(hot)
+        if not found:
+            return None
+        blob = found[0]
+
+        # Gallery guard. A search-results page or an image grid produces many
+        # comparable blobs rather than one dominant picture. Cropping to the
+        # biggest of them hands the vision model a wall of thumbnails, and a
+        # 450M model given something it cannot resolve does not hedge — it
+        # invents. Measured on a 12-thumbnail grid it reported
+        # "MASSACHUSETTS ELECTION 2018", none of which was on screen.
+        #
+        # A fabricated reading is worse than no reading, because nothing
+        # downstream can tell the two apart. So when the frame looks like a
+        # gallery we decline, and OCR alone covers it.
+        peers = sum(1 for b in found if len(b) >= len(blob) * _PEER_SIZE_FRAC)
+        if peers >= _GALLERY_MIN_PEERS:
             return None
 
         frac = len(blob) / float(cells.size)

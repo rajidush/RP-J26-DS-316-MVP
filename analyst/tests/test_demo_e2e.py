@@ -11,7 +11,14 @@ sys.path.insert(0, str(ROOT))
 
 from analyst.demo_e2e import Case, _run_case, _table
 from analyst.pipeline import AnalystPipeline
-from analyst.stage2.fusion import TEXT_WEIGHT, VISION_WEIGHT, fuse, fusion_detail
+from analyst.stage2.fusion import TEXT_WEIGHT, VISION_WEIGHT, Signal, fuse, fuse_signals
+
+
+def _detail(text, vision):
+    return fuse_signals([
+        Signal("text", text, True, "text"),
+        Signal("vision", vision, True, "vision"),
+    ])
 
 
 class FusionMathTests(unittest.TestCase):
@@ -22,19 +29,19 @@ class FusionMathTests(unittest.TestCase):
         both = fuse(0.8, 0.8)
         self.assertGreater(both, 0.0)
 
-    def test_meme_bump_when_both_mid(self):
+    def test_agreement_bonus_when_both_mid(self):
         bumped = fuse(0.5, 0.5)
         base = TEXT_WEIGHT * 0.5 + VISION_WEIGHT * 0.5
         self.assertGreater(bumped, base)
         self.assertLessEqual(bumped, 1.0)
-        detail = fusion_detail(0.5, 0.5)
-        self.assertTrue(detail["meme_bump"])
-        self.assertEqual(detail["fused"], bumped)
+        detail = _detail(0.5, 0.5)
+        self.assertTrue(detail.agreement)
+        self.assertEqual(detail.fused, bumped)
 
-    def test_no_bump_when_one_low(self):
+    def test_no_bonus_when_one_low(self):
         # Strong text + mild vision keeps text floor
         self.assertAlmostEqual(fuse(0.9, 0.1), 0.9, places=4)
-        self.assertFalse(fusion_detail(0.9, 0.1)["meme_bump"])
+        self.assertFalse(_detail(0.9, 0.1).agreement)
 
     def test_strong_text_not_diluted(self):
         self.assertGreaterEqual(fuse(0.88, 0.2), 0.88)

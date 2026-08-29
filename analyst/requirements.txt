@@ -3,15 +3,19 @@ pydantic>=2.0.0
 pillow>=10.0.0
 numpy>=1.24.0
 
-# Step 1 — pretrained Stage-1 text (optional but recommended for demo)
-# transformers>=4.36.0
-# torch  → install CPU wheel: pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Step 1 — Stage-1 text models. No longer optional for the accuracy claims:
+# without them the cascade falls back to lexicon-only, which measures 94% on
+# the development set but 52.5% held out (see evaluation/accuracy_report_*.md).
+# The lexicon alone still runs, so a missing install degrades rather than breaks.
+transformers>=4.36.0
+# torch → CPU wheel: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # Step 2–3 — OCR / ASR
 # rapidocr-onnxruntime requires Python <3.13. On 3.13+ install `rapidocr`
 # instead (same engine, newer package) — extract/ocr.py supports both.
 rapidocr-onnxruntime>=1.3.0 ; python_version < "3.13"
 rapidocr>=3.0.0 ; python_version >= "3.13"
+onnxruntime>=1.16.0          # OCR inference engine; also used by offline_backend
 faster-whisper>=1.0.0
 
 # Step 4 — CLIP image branch (same torch+transformers as Step 1)

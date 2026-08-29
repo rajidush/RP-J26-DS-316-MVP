@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS runs (
     recommended_action TEXT,
     thumb_jpeg BLOB,
     envelope_json TEXT,
-    trace_json TEXT
+    trace_json TEXT,
+    evidence_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_ts ON runs(ts DESC);
 """
@@ -96,6 +97,11 @@ class AnalystStore:
             conn.execute("ALTER TABLE runs ADD COLUMN image_caption TEXT")
         if "image_text" not in cols:
             conn.execute("ALTER TABLE runs ADD COLUMN image_text TEXT")
+        # Why the score is what it is: which detector fired, whether the framing
+        # guard discounted it, whether the image branch was allowed to count.
+        # One JSON column rather than six, so adding a signal is not a migration.
+        if "evidence_json" not in cols:
+            conn.execute("ALTER TABLE runs ADD COLUMN evidence_json TEXT")
 
     def insert_run(self, row: Dict[str, Any]) -> str:
         run_id = row.get("id") or _new_id()
@@ -109,13 +115,13 @@ class AnalystStore:
                         ocr_snippet, transcript_snippet, image_caption, image_text, lexicon_hits_json,
                         stage1_json, stage2_json, backends_json, latency_json, notes_json,
                         app_exe, modalities_json, child_safe_summary, recommended_action,
-                        thumb_jpeg, envelope_json, trace_json
+                        thumb_jpeg, envelope_json, trace_json, evidence_json
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?,
                         ?, ?, ?,
                         ?, ?, ?, ?, ?,
                         ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -141,6 +147,7 @@ class AnalystStore:
                         row.get("thumb_jpeg"),
                         _json(row.get("envelope")),
                         _json(row.get("trace")),
+                        _json(row.get("evidence")),
                     ),
                 )
                 conn.commit()
@@ -287,5 +294,6 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     d["modalities"] = _parse_json(d.pop("modalities_json", None)) or {}
     d["envelope"] = _parse_json(d.pop("envelope_json", None))
     d["trace"] = _parse_json(d.pop("trace_json", None))
+    d["evidence"] = _parse_json(d.pop("evidence_json", None)) or {}
     # Keep thumb_jpeg as bytes; API layer may base64 it
     return d

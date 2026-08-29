@@ -119,6 +119,22 @@ first (saturation + local contrast on a coarse grid, largest connected blob) and
 the branch **declines to ask** when no distinct picture is present. On a plain
 text page it correctly returns nothing — OCR already covers that.
 
+### 1b. Score the readings separately — do not concatenate them
+
+Measured when the branch was first switched on. A meme scoring **0.9961** from
+its OCR text alone fell to **0.70** once the model's description was appended
+to the same blob:
+
+    OCR              "NOBODY LIKES YOU  GO BACK TO YOUR COUNTRY"
+    image meaning    "a red circle with yellow text saying nobody likes you..."
+
+Descriptive prose *about* harmful content scores lower than the harmful content
+itself, so concatenating the two dilutes the signal. The pipeline now scores the
+read text (overlay + OCR + speech) and the picture reading **separately** and
+takes the higher of the two, which restored 0.9961 while keeping both readings
+visible as evidence. Clean cases are unaffected — a gaming screenshot still
+scores 0.18 and an abstract picture 0.08.
+
 ### 2. The model reads, the lexicon judges
 
 The VLM is never asked "is this hate". At 450M it cannot follow a strict label
@@ -223,6 +239,24 @@ Privacy: raw frames/audio stay in RAM then wipe. Panel is localhost-only.
 
 ## Step 6 — Fine-tune + Dataset C (after demo)
 
-- Logistic probe on CLIP embeddings
+- Logistic probe on CLIP embeddings. Until it exists `image_fast` reports
+  `calibrated = False` and is excluded from the fused score — measured, it
+  returns 0.324-0.393 for every image, which is noise.
 - Fusion MLP vs this rule-based head
 - Do not block the live demo on this step
+
+**The pretrained baseline already exists.** `analyst/evaluation/` benchmarks the
+current cascade against Jigsaw, Davidson and Berkeley with content-derived
+train/dev/test splits, so a fine-tuned model has something honest to beat:
+
+```powershell
+python -m analyst.evaluation.benchmark --corpus berkeley:test --scorer cascade
+python -m analyst.evaluation.corpora     # provenance + class balance
+```
+
+Two rules when working on this step:
+
+1. Tune on `:train`, sanity-check on `:dev`, report on `:test`. Splits come from
+   a hash of the text, so they survive re-sampling.
+2. `jigsaw:*` is **contaminated** — `unitary/toxic-bert` was trained on it.
+   Never quote it as a generalisation result for a stack containing that head.

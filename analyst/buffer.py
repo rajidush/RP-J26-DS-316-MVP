@@ -47,16 +47,10 @@ class TransientMediaBuffer:
                 "audio": _to_buffer(audio),
             }
 
-    def get(self, trigger_id: str) -> dict:
-        """Detached copies. Callers own them; delete() cannot wipe these."""
-        with self._lock:
-            slot = self._slots.get(trigger_id)
-            if slot is None:
-                return {"frame": None, "audio": None}
-            return {
-                "frame": bytes(slot["frame"]) if slot["frame"] is not None else None,
-                "audio": bytes(slot["audio"]) if slot["audio"] is not None else None,
-            }
+    # NOTE: a get() returning detached copies was removed deliberately. Copies
+    # escape the wipe — delete() zeroes the buffer it owns, not a caller's
+    # duplicate — which quietly breaks the "frames never outlive the run"
+    # guarantee. borrow() is the only accessor for that reason.
 
     def borrow(self, trigger_id: str) -> dict:
         """Live buffers — the same objects delete() zeroes. Never copy or retain."""

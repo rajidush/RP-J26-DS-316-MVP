@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
@@ -38,7 +38,13 @@ class Envelope(BaseModel):
 
 
 class FrameCaptured(BaseModel):
-    """C1 → C2. Until C1 exists, replay / CLI builds this locally."""
+    """C1 → C2 bus contract (Engineering Plan §2.4).
+
+    NOT YET WIRED. C1 does not exist, so nothing in this repo constructs or
+    consumes it — `capture/worker.py` produces JPEG bytes directly and
+    `--replay` reads from disk. It is kept because it is the *interface spec*
+    C1 will be built against; delete it only if that integration is dropped.
+    """
 
     monitor: int = 0
     w: int = 0
@@ -49,15 +55,6 @@ class FrameCaptured(BaseModel):
     fg_rect: Optional[List[int]] = None
     fg_exe: str = "unknown"
     reason: Literal["scene_change", "heartbeat", "replay", "manual"] = "manual"
-
-
-class SpeechSegment(BaseModel):
-    """Internal C2 audio segment after VAD (or whole clip in MVP)."""
-
-    pcm_or_file_bytes: bytes
-    sample_rate: int = 16000
-    duration_s: float = 0.0
-    source: Literal["loopback", "file", "mic_opt_in"] = "file"
 
 
 class Modalities(BaseModel):
@@ -106,6 +103,10 @@ class AnalystRunResult(BaseModel):
     image_caption: str = ""
     image_text: str = ""
     image_region: Optional[List[int]] = None
+    # Where on the frame each detection came from, normalised to 0..1 so the
+    # panel can draw an overlay on the 320px blurred thumbnail. Presentation
+    # only — the decision does not depend on these.
+    detections: List[Dict[str, Any]] = Field(default_factory=list)
     stage1: Dict[str, float] = Field(default_factory=dict)
     stage2: Optional[Dict[str, float]] = None
     backends: Dict[str, str] = Field(default_factory=dict)
@@ -117,6 +118,21 @@ class AnalystRunResult(BaseModel):
     explanation: str = ""
     protection_state: Literal["protected", "reviewing", "threat", "degraded"] = "protected"
     lexicon_hits: List[str] = Field(default_factory=list)
+
+    # --- Why the score is what it is (panel + audit trail) -------------------
+    # Split the two Stage-1 detectors so a reviewer can see which one fired.
+    lexicon_score: float = 0.0
+    model_score: Optional[float] = None
+    model_labels: Dict[str, float] = Field(default_factory=dict)
+    # Set when the framing guard reduced the score because the text reads as
+    # reporting/quoting harm rather than committing it. Never silent.
+    framing_reason: str = ""
+    score_before_framing: Optional[float] = None
+    # False while the image branch is uncalibrated: it is shown but excluded
+    # from the fused score (see stage2/fusion.py).
+    vision_calibrated: bool = False
+    fusion_mode: str = "idle"
+    escalated: bool = False
 
 
 CHILD_SAFE_SUMMARIES: Dict[str, str] = {
