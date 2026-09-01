@@ -47,6 +47,47 @@ bought. That is why this default moves with it rather than independently.
 So: raise capture width to read smaller text, and keep this at or above it.
 Raising this alone buys nothing — fix the encoder and the width instead.
 
+Why v6 tiny (measured 1 Sep 2026, this CPU, real captured frame)
+---------------------------------------------------------------
+The defaults were PP-OCRv5 mobile, chosen when v6 was benchmarked only on
+clean chat-bar assets where it looked ~2.4x slower. Re-measured on a real
+1100 px capture of a browser showing a PDF of captioned memes -- 12 known
+phrases, warm timings, servers stopped:
+
+    model                phrases    warm ms
+    v4 mobile              9/12       1574
+    v5 mobile (was)        9/12       2951
+    v6 small              11/12       3034
+    v6 tiny (now)         12/12        738
+
+The smallest model is both the most accurate here and 4.0x faster than the
+v5 mobile it replaces, which also pulls OCR back inside the 2.5 s capture
+tick (it was over budget on dense screens). This matches the PP-OCRv6 paper's
+"3.9x faster than PP-OCRv5_mobile on Intel Xeon".
+
+Note the paper rates tiny at 73.5% -- *below* v5 server -- on its in-house
+multilingual document benchmark. That is a different distribution: English
+screen text with UI chrome is what we run on, and tiny leads there. Do not
+promote these numbers as general OCR accuracy.
+
+One difference from v5, checked and found not to matter in practice: on a
+*synthetic* near-empty canvas -- one short line on 1920x1080 of plain white --
+the v6 detector returns zero regions up to ~16 px, where v5 reads it. It needs
+both conditions to trigger. Re-tested on realistic sparse screens the two are
+identical:
+
+    fixture                     v5 regions   v6 regions
+    chat window, 3 messages         4            4
+    document with one heading       1            1
+
+both reading the harmful line verbatim. So this is a property of blank-canvas
+detection normalisation, not a recall loss on real screens. Revert with
+ANALYST_OCR_VERSION=PPOCRV5 / ANALYST_OCR_MODEL_TYPE=MOBILE if a genuinely
+sparse capture ever reads as blank.
+
+Neither model changes the ~9 px glyph floor: at 8 px all four configs fail
+identically. That is a sampling limit, not a model-quality one.
+
 PP-OCRv5 SERVER det/rec weights were tried for the residual errors and did
 not finish a single frame inside 10 minutes on this CPU, so mobile stays.
 Three of the five remaining errors are `AI`->`Al`: in most sans UI fonts
@@ -70,22 +111,28 @@ _OCR_THREADS = int(os.environ.get("ANALYST_OCR_THREADS", "4"))
 _OCR_USE_CLS = os.environ.get("ANALYST_OCR_CLS", "0").strip() in ("1", "true", "yes")
 # Sharpen/contrast enhancement, off by default — see _preprocess().
 _OCR_ENHANCE = os.environ.get("ANALYST_OCR_ENHANCE", "0").strip() in ("1", "true", "yes")
+# Model family. PP-OCRv6 tiny is both faster and more accurate here than the
+# v5 mobile pair it replaced — see "Why v6 tiny" in the module docstring.
+_OCR_VERSION = os.environ.get("ANALYST_OCR_VERSION", "PPOCRV6").strip().upper()
+_OCR_MODEL_TYPE = os.environ.get("ANALYST_OCR_MODEL_TYPE", "TINY").strip().upper()
 
 
 def _rapid3_params() -> dict:
     """Screen-capture profile for RapidOCR 3.x (see module docstring)."""
     from rapidocr import ModelType, OCRVersion
 
+    version = getattr(OCRVersion, _OCR_VERSION, OCRVersion.PPOCRV6)
+    model_type = getattr(ModelType, _OCR_MODEL_TYPE, ModelType.TINY)
     return {
         # Cap the LONGER side. The default caps the shorter side, which upscales
         # wide-and-short screenshots into megapixel detection inputs.
         "Det.limit_type": "max",
         "Det.limit_side_len": _DET_SIDE_LEN,
-        # PP-OCRv5 mobile: same text on our assets, ~2.4x faster than v6 small.
-        "Det.ocr_version": OCRVersion.PPOCRV5,
-        "Det.model_type": ModelType.MOBILE,
-        "Rec.ocr_version": OCRVersion.PPOCRV5,
-        "Rec.model_type": ModelType.MOBILE,
+        # PP-OCRv6 tiny — see "Why v6 tiny" in the module docstring.
+        "Det.ocr_version": version,
+        "Det.model_type": model_type,
+        "Rec.ocr_version": version,
+        "Rec.model_type": model_type,
         # Small models contend on 12 threads; 4 measured fastest here.
         "EngineConfig.onnxruntime.intra_op_num_threads": _OCR_THREADS,
         "Global.use_cls": _OCR_USE_CLS,
