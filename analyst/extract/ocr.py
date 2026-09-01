@@ -19,6 +19,39 @@ became 3345x736 — a 2.5 MP detection input for one line of text. Capping the
 The angle classifier is off because screen text is upright; re-enable it with
 ANALYST_OCR_CLS=1 if rotated content matters. Every knob is env-overridable so
 a slower, more thorough profile is one variable away.
+
+This cap is NOT where OCR accuracy is won (measured 1 Sep 2026)
+--------------------------------------------------------------
+Screen text was being read badly, and this cap looked like the obvious cause:
+`capture/screen` hands over a 1280 px frame, so a 960 cap resizes it again.
+It is not the cause. Holding the capture encoder at LANCZOS/q92 and moving
+only this knob, on a 1920x1080 dashboard fixture with 30 known strings:
+
+    detection cap      strings read (of 30)      ms
+    960                        27               2432
+    1280                       27               2275
+    1600                       27               2354
+
+Identical. The entire loss was upstream in the capture encoder — see the
+table in `capture/screen.py`, where BILINEAR/q75 -> LANCZOS/q92 moves the
+same fixture from 20/30 to 27/30. Raising this cap *alone*, with the old
+encoder, also changed nothing (20/30). Text that was aliased and
+JPEG-ringed before detection cannot be recovered by detecting it larger.
+
+What this knob must NOT do is bind below the capture width. It is the ceiling
+on what detection sees, so it has to track `ANALYST_CAPTURE_WIDTH` (now 1600):
+capture hands over a 1600 px frame, and a 960 or 1280 cap would shrink it
+again and throw away exactly the small-text recall that widening capture just
+bought. That is why this default moves with it rather than independently.
+
+So: raise capture width to read smaller text, and keep this at or above it.
+Raising this alone buys nothing — fix the encoder and the width instead.
+
+PP-OCRv5 SERVER det/rec weights were tried for the residual errors and did
+not finish a single frame inside 10 minutes on this CPU, so mobile stays.
+Three of the five remaining errors are `AI`->`Al`: in most sans UI fonts
+capital-I and lowercase-l are the same glyph, so that is not recoverable
+from pixels at all, by any engine.
 """
 
 from __future__ import annotations
@@ -32,7 +65,7 @@ from PIL import Image, ImageEnhance
 _MIN_WIDTH = 640
 
 # See the module docstring for the measurements behind these defaults.
-_DET_SIDE_LEN = int(os.environ.get("ANALYST_OCR_SIDE_LEN", "960"))
+_DET_SIDE_LEN = int(os.environ.get("ANALYST_OCR_SIDE_LEN", "1600"))
 _OCR_THREADS = int(os.environ.get("ANALYST_OCR_THREADS", "4"))
 _OCR_USE_CLS = os.environ.get("ANALYST_OCR_CLS", "0").strip() in ("1", "true", "yes")
 # Sharpen/contrast enhancement, off by default — see _preprocess().
