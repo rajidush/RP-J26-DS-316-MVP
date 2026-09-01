@@ -87,6 +87,19 @@ def api_health() -> dict:
     audio_err = getattr(worker.audio, "last_error", "")
     if audio_err:
         backend_errors["audio"] = audio_err
+    # The meme reader is the one branch that goes quiet without failing: with
+    # ANALYST_VLM_URL unset it never runs, reports "none", and logs nothing.
+    # That reads as "no memes on screen" rather than "the meme channel is off",
+    # which is exactly how a demo of captioned memes can score 0.08 and look
+    # like a broken classifier. Say so explicitly.
+    vlm = getattr(pipeline, "vision_meaning", None)
+    if vlm is not None and not getattr(vlm, "enabled", False):
+        backend_errors["vision_meaning"] = (
+            "disabled: ANALYST_VLM_URL not set - the meme reader (picture "
+            "meaning + text inside pictures) will not run"
+        )
+    elif vlm is not None and getattr(vlm, "last_error", ""):
+        backend_errors["vision_meaning"] = vlm.last_error
 
     return {
         "ok": True,
