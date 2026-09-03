@@ -44,7 +44,9 @@ app = FastAPI(title="Guardian Analyst", version="0.2.0")
 
 class StartBody(BaseModel):
     age: int = Field(10, ge=5, le=17)
-    interval_s: float = Field(2.5, ge=2.0, le=30.0)
+    # A check measures 6-9s typically (38s worst seen), so anything under
+    # ~10s can only overlap and be skipped. See CaptureWorker.start().
+    interval_s: float = Field(30.0, ge=10.0, le=600.0)
 
 
 def _thumb_b64(thumb: Optional[bytes]) -> Optional[str]:
@@ -53,9 +55,25 @@ def _thumb_b64(thumb: Optional[bytes]) -> Optional[str]:
     return "data:image/jpeg;base64," + base64.b64encode(thumb).decode("ascii")
 
 
-def _public_run(row: Dict[str, Any]) -> Dict[str, Any]:
+def _public_run(row: Dict[str, Any], *, full: bool = True) -> Dict[str, Any]:
+    """Serialise a stored run for the panel.
+
+    `full=False` is the list view. Three fields dominate a run's size and none
+    of them are drawn in a list: the preview image, the rebuilt trace, and the
+    per-region detections. Serving all forty runs complete, every three
+    seconds, moved 3.16 MB per poll — 63 MB a minute — to render 0.07 MB of
+    visible headlines. The panel now fetches the whole run only for the one it
+    has selected, via /api/runs/{id}.
+    """
     out = dict(row)
     thumb = out.pop("thumb_jpeg", None)
+    if not full:
+        out.pop("trace", None)
+        evidence = out.get("evidence")
+        if isinstance(evidence, dict):
+            # `escalated` is the only evidence field the list reads.
+            out["evidence"] = {k: v for k, v in evidence.items() if k != "detections"}
+        return out
     out["thumb_data_url"] = _thumb_b64(thumb)
     if not out.get("trace"):
         out["trace"] = trace_from_run_row(row)
@@ -139,7 +157,21 @@ def api_retention() -> dict:
 
 @app.get("/api/whitebox")
 def api_whitebox() -> dict:
-    return worker.whitebox()
+    """Live pipeline snapshot for the White box tab.
+
+    The worker's trace ring is in memory, so it is empty after a restart and
+    stays empty for anyone who only ever uses "Test a message" — that path
+    persists a run but never ticks the worker. Falling back to the newest
+    stored run means the diagram has something real to show in both cases,
+    rather than an empty pipeline that looks broken.
+    """
+    wb = worker.whitebox()
+    if not wb.get("last_trace"):
+        rows = store.list_runs(limit=1)
+        if rows:
+            wb["last_trace"] = trace_from_run_row(rows[0])
+            wb["trace_source"] = "stored run"
+    return wb
 
 
 class PreviewBody(BaseModel):
@@ -187,7 +219,7 @@ def api_capture_stop() -> dict:
 
 @app.get("/api/runs")
 def api_runs(limit: int = 50) -> dict:
-    rows = [_public_run(r) for r in store.list_runs(limit=limit)]
+    rows = [_public_run(r, full=False) for r in store.list_runs(limit=limit)]
     return {"runs": rows, "stats": store.stats()}
 
 

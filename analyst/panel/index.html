@@ -83,7 +83,8 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.012em}
 .rail .badge{margin-left:auto;font-size:10.5px;font-weight:700;background:var(--alert);
   color:#fff;border-radius:99px;padding:1px 7px}
 .rail .foot{margin-top:auto;padding:14px 18px 0;font-size:11px;color:#7d8ea3;line-height:1.5}
-.rail .foot button{margin-top:9px;background:var(--rail-2);border:1px solid #33404f;color:#c3ccd8;
+.rail .foot button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.rail .foot button{margin-top:9px;margin-right:6px;background:var(--rail-2);border:1px solid #33404f;color:#c3ccd8;
   font:inherit;font-size:12px;padding:6px 11px;border-radius:6px;cursor:pointer}
 @media (max-width:820px){
   /* Stacked layout: the rail becomes a sticky top bar, so height must go back
@@ -144,6 +145,8 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.012em}
 .ov-q{border:1px solid color-mix(in srgb,var(--accent) 50%,transparent)}
 .ov-hit{border:2.5px solid var(--alert);background:color-mix(in srgb,var(--alert) 15%,transparent);
   box-shadow:0 0 0 2px color-mix(in srgb,var(--alert) 20%,transparent)}
+.ov-warn{border:2px solid var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+.ov-warn .ov-tag{background:var(--warn);color:#1a1205}
 .ov-pic{border:2px dashed var(--ok);background:color-mix(in srgb,var(--ok) 8%,transparent)}
 .ov-tag{position:absolute;top:-17px;left:-2px;font-size:10px;font-weight:700;line-height:1.5;
   padding:1px 5px;border-radius:4px;white-space:nowrap;background:var(--alert);color:#fff}
@@ -152,17 +155,115 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.012em}
 .legend i{display:inline-block;width:16px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .lg-q{border:1px solid color-mix(in srgb,var(--accent) 50%,transparent)}
 .lg-hit{border:2px solid var(--alert);background:color-mix(in srgb,var(--alert) 15%,transparent)}
+.lg-warn{border:2px solid var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
 .lg-pic{border:2px dashed var(--ok)}
-.rows{list-style:none;margin:0;padding:0;max-height:320px;overflow-y:auto;
+.rows{list-style:none;margin:0;padding:0;max-height:520px;overflow-y:auto;
   border:1px solid var(--line);border-radius:var(--r-sm)}
-.rows li{display:flex;gap:11px;align-items:baseline;padding:9px 12px;
+.rows li{display:flex;gap:11px;align-items:flex-start;padding:9px 12px;
   border-bottom:1px solid var(--line);font-size:13px}
 .rows li:last-child{border-bottom:0}
-.rows li.hit{background:var(--alert-soft)}
-.rows .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rows li.hit{background:var(--alert-soft);border-left:3px solid var(--alert);padding-left:9px}
+.rows li.warn{background:var(--warn-soft);border-left:3px solid var(--warn);padding-left:9px}
+/* Wrap instead of truncating: the point of this list is to read what was
+   actually on screen, and an ellipsis hides exactly the end of a sentence
+   where the hurtful part usually sits. */
+.rows .t{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.45}
+.rows li.hit .t,.rows li.warn .t{font-weight:600}
 .rows .s{flex:none;font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;color:var(--muted)}
 .rows li.hit .s{color:var(--alert)}
-.rows .why{flex:none;font-size:11px;color:var(--alert);font-weight:600}
+.rows li.warn .s{color:var(--warn)}
+.rows .why{flex:none;font-size:10.5px;font-weight:700;letter-spacing:.02em;
+  text-transform:uppercase;padding:1px 6px;border-radius:99px;line-height:1.6}
+.rows li.hit .why{background:var(--alert);color:#fff}
+.rows li.warn .why{background:var(--warn);color:#1a1205}
+.readsum{display:flex;flex-wrap:wrap;gap:6px;margin:3px 0 11px;font-size:12px}
+.readsum b{font-weight:700}
+.pill{padding:2px 9px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.pill.alert{background:var(--alert-soft);border-color:var(--alert);color:var(--alert)}
+.pill.warn{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
+
+/* ---------- white box diagram ---------- */
+.wbctl{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:14px}
+.wbauto{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;
+  cursor:pointer;white-space:nowrap;flex:none}
+.wblegend{display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;color:var(--muted);margin-left:auto}
+.wbk{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.wbk-ok{background:var(--ok)} .wbk-skip{background:var(--faint)}
+.wbk-warn{background:var(--warn)} .wbk-fail{background:var(--alert)}
+.wbk-off{background:transparent;border:1px dashed var(--faint)}
+.wbk-cond{background:transparent;border-top:2px dashed var(--muted);height:0;border-radius:0}
+.wbhead.cond{opacity:.8}
+.wbwrap{width:100%;overflow-x:auto}
+.wbwrap svg{display:block;width:100%;min-width:1140px;height:auto}
+.wbcol{fill:var(--faint);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.wbbox{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1.5;rx:9}
+path.wbbox{stroke-linejoin:round}
+.wbtitle{fill:var(--text);font-size:13px;font-weight:600}
+.wbsub{fill:var(--muted);font-size:10.5px}
+.wbms{fill:var(--faint);font-size:10.5px;font-weight:700}
+.wbedge{fill:none;stroke:var(--line-2);stroke-width:2}
+/* a path the engine only takes under a condition */
+.wbedge.cond{stroke-dasharray:5 4;opacity:.8}
+.wbelabel{fill:var(--faint);font-size:9.5px;font-weight:700;letter-spacing:.02em}
+.wbsub2{fill:var(--faint);font-size:9.5px}
+.n-skip .wbsub2,.n-off .wbsub2{opacity:.5}
+.wbhead{fill:var(--line-2)}
+/* status */
+.n-ok   .wbbox{stroke:var(--ok);   fill:color-mix(in srgb,var(--ok) 9%,var(--surface-2))}
+.n-warn .wbbox{stroke:var(--warn); fill:color-mix(in srgb,var(--warn) 12%,var(--surface-2))}
+.n-fail .wbbox{stroke:var(--alert);fill:color-mix(in srgb,var(--alert) 12%,var(--surface-2))}
+.n-skip .wbbox{stroke:var(--line-2);stroke-dasharray:4 3;fill:transparent}
+.n-skip .wbtitle,.n-skip .wbsub{opacity:.55}
+.n-off  .wbbox{stroke:var(--faint);stroke-dasharray:2 4;fill:transparent}
+.n-off  .wbtitle,.n-off .wbsub{opacity:.4}
+.n-idle .wbbox{stroke:var(--line-2)}
+/* the moment a node runs */
+.wbnode{transition:opacity .18s}
+.n-firing .wbbox{stroke:var(--accent);stroke-width:2.5;
+  fill:color-mix(in srgb,var(--accent) 16%,var(--surface-2))}
+.n-firing .wbtitle{fill:var(--accent)}
+.wbnow{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px;color:var(--muted)}
+.wbnow i{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none}
+.wbnow.busy{color:var(--accent)} .wbnow.busy i{background:var(--accent);animation:wbblink 1s ease-in-out infinite}
+.wbnow.armed{color:var(--ok)} .wbnow.armed i{background:var(--ok)}
+@keyframes wbblink{50%{opacity:.25}}
+/* a stage executing at this very moment */
+.n-running .wbbox{stroke:var(--accent);stroke-width:2.5;
+  fill:color-mix(in srgb,var(--accent) 18%,var(--surface-2))}
+.n-running .wbtitle{fill:var(--accent)}
+.n-running .wbms{fill:var(--accent)}
+.n-running .wbpulse{animation:wbping 1s ease-out infinite}
+/* progressive fill while a check is in flight */
+.wbnode.n-pending{opacity:.4}
+.wbnode.n-notrun{opacity:.45}
+.wbnode.n-notrun .wbbox{stroke-dasharray:4 3}
+.n-done .wbbox{stroke:var(--accent);stroke-width:2}
+.n-done .wbms{fill:var(--accent);font-weight:700}
+.wbpulse{fill:none;stroke:var(--accent);stroke-width:2.5;rx:9;opacity:0}
+.n-firing .wbpulse{animation:wbping 1s ease-out infinite}
+@keyframes wbping{0%{opacity:.65;transform:scale(1)}100%{opacity:0;transform:scale(1.035)}}
+/* the flowing connector */
+.wbedge.live{stroke:var(--accent);stroke-width:2.5;stroke-dasharray:7 6;
+  animation:wbflow .55s linear infinite}
+@keyframes wbflow{to{stroke-dashoffset:-26}}
+.wbdim{opacity:.32}
+/* step list */
+.wbstep{display:grid;grid-template-columns:20px 1fr auto;gap:11px;align-items:center;
+  padding:8px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.wbstep:last-child{border-bottom:0}
+.wbstep .dot{width:11px;height:11px;border-radius:50%;justify-self:center}
+.wbstep.s-ok .dot{background:var(--ok)} .wbstep.s-skip .dot{background:var(--faint)}
+.wbstep.s-warn .dot{background:var(--warn)} .wbstep.s-fail .dot{background:var(--alert)}
+.wbstep .lbl{font-weight:600}
+.wbstep .det{font-size:11.5px;color:var(--muted)}
+.wbbar{height:5px;border-radius:99px;background:var(--accent-soft);margin-top:4px;position:relative}
+.wbbar i{position:absolute;inset:0 auto 0 0;border-radius:99px;background:var(--accent);display:block}
+.wbstep .ms{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);font-weight:600}
+.wbstep.now{background:var(--accent-soft);border-radius:6px}
+@media (prefers-reduced-motion:reduce){
+  .n-firing .wbpulse,.n-running .wbpulse,.wbnow.busy i{animation:none}
+  .wbedge.live{animation:none}
+}
 
 /* ---- meter + evidence ---- */
 .verdict{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:15px}
@@ -242,11 +343,12 @@ button.btn.primary:hover:not(:disabled){filter:brightness(1.08)}
       <button class="tab" role="tab" id="t-home"   aria-controls="p-home"   aria-selected="true"><span class="ic" aria-hidden="true">⌂</span>Home</button>
       <button class="tab" role="tab" id="t-det"    aria-controls="p-det"    aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">◎</span>Detections<span id="detBadge" class="badge" hidden>0</span></button>
       <button class="tab" role="tab" id="t-mon"    aria-controls="p-mon"    aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">▣</span>Monitoring</button>
-      <button class="tab" role="tab" id="t-test"   aria-controls="p-test"   aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">⌨</span>Test a message</button>
+      <button class="tab" role="tab" id="t-wb"     aria-controls="p-wb"     aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">◷</span>White box</button>
       <button class="tab" role="tab" id="t-eng"    aria-controls="p-eng"    aria-selected="false" tabindex="-1"><span class="ic" aria-hidden="true">⚙</span>Engine</button>
     </nav>
     <div class="foot">
       Research prototype · J26-DS-316<br />Nothing leaves this machine.
+      <button id="testBtn" type="button">Test a message</button>
       <button id="themeBtn" type="button">Switch theme</button>
     </div>
   </aside>
@@ -306,12 +408,13 @@ button.btn.primary:hover:not(:disabled){filter:brightness(1.08)}
               <option value="15">14–15 years</option>
             </select>
           </div>
-          <div style="width:160px">
+          <div style="width:230px">
             <label for="interval">Check every</label>
             <select id="interval">
-              <option value="30" selected>30 seconds</option>
-              <option value="10">10 seconds</option>
-              <option value="2.5">2.5 seconds</option>
+              <option value="15">15 seconds — fastest</option>
+              <option value="30" selected>30 seconds — recommended</option>
+              <option value="60">1 minute — light</option>
+              <option value="120">2 minutes — minimal</option>
             </select>
           </div>
           <button id="btnStart" class="btn primary" type="button">Start monitoring</button>
@@ -347,6 +450,38 @@ button.btn.primary:hover:not(:disabled){filter:brightness(1.08)}
       <div class="panel"><h2>Suggested examples</h2><div class="in" id="examples"></div></div>
     </section>
 
+    <!-- WHITE BOX -->
+    <section role="tabpanel" id="p-wb" aria-labelledby="t-wb" hidden>
+      <div class="head"><h1>White box</h1>
+        <p>Every model inside the engine, and the path one check takes through them.
+           Nodes light up in the order they actually ran.</p></div>
+
+      <div class="panel">
+        <h2 style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          How a check flows
+          <span id="wbTag" class="pill">waiting for a check</span>
+        </h2>
+        <div class="in">
+          <div class="wbctl">
+            <span id="wbNow" class="wbnow">connecting…</span>
+            <button id="wbReplay" class="btn" type="button">Replay last check</button>
+            <span class="wblegend">
+              <span><i class="wbk wbk-ok"></i>ran</span>
+              <span><i class="wbk wbk-skip"></i>skipped</span>
+              <span><i class="wbk wbk-warn"></i>attention</span>
+              <span><i class="wbk wbk-fail"></i>failed</span>
+              <span><i class="wbk wbk-off"></i>not installed</span>
+              <span><i class="wbk wbk-cond"></i>conditional path</span>
+            </span>
+          </div>
+          <div id="wbDiagram" class="wbwrap"></div>
+          <p id="wbCaption" class="note"></p>
+        </div>
+      </div>
+
+      <div class="panel"><h2>Step by step</h2><div class="in" id="wbSteps"></div></div>
+    </section>
+
     <!-- ENGINE -->
     <section role="tabpanel" id="p-eng" aria-labelledby="t-eng" hidden>
       <div class="head"><h1>Engine</h1>
@@ -375,23 +510,41 @@ let runs = [], selected = null, timer = null;
    captures arrived in `runs` but the view never moved — the page looked frozen
    and only "updated" on a manual reload, which reset the pin. */
 let pinned = false;
+/* Declared up here, not beside wbPoll() below: show() runs during page init
+   and calls wbPollStart(), so every variable that function touches must
+   already be initialised. A `let` further down is still in its temporal dead
+   zone at that point and throws, taking the whole init block with it. */
+let wbTimer = null;
+let wbRate = 0;
 
 async function api(p, o) { const r = await fetch(p, o); if (!r.ok) throw new Error(`${p} → ${r.status}`); return r.json(); }
 function showErr(m) { const e = $("err"); if (!m) { e.hidden = true; return; } e.hidden = false; e.textContent = m; }
 
 /* ---------- tabs (real ARIA, arrow-key navigable) ---------- */
-const TABS = ["home", "det", "mon", "test", "eng"];
+/* "test" is a panel with no rail button — it is reached from the utility
+   button in the footer, because checking a sample message is a thing you do
+   occasionally, not one of the five places you live in. show() and the
+   arrow-key ring therefore both tolerate a missing tab button. */
+const TABS = ["home", "det", "mon", "wb", "eng", "test"];
+const RAIL_TABS = TABS.filter(n => n !== "test");
 function show(name) {
   TABS.forEach(n => {
     const t = $("t-" + n), p = $("p-" + n), on = n === name;
-    t.setAttribute("aria-selected", String(on));
-    t.tabIndex = on ? 0 : -1;
-    p.hidden = !on;
+    if (t) { t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1; }
+    if (p) p.hidden = !on;
   });
+  const tb = $("testBtn");
+  if (tb) tb.setAttribute("aria-pressed", String(name === "test"));
   try { localStorage.setItem("ga-tab", name); } catch (_) {}
+  // The white box polls only while open, and starts immediately rather than
+  // waiting out the remainder of a cycle.
+  if (typeof wbPollStart === "function") {
+    if (name === "wb") wbPollStart(); else wbPollStop();
+  }
 }
-TABS.forEach((n, i) => {
+RAIL_TABS.forEach((n, i) => {
   const t = $("t-" + n);
+  if (!t) return;
   t.onclick = () => show(n);
   t.onkeydown = e => {
     const k = e.key;
@@ -399,12 +552,13 @@ TABS.forEach((n, i) => {
         && k !== "Home" && k !== "End") return;
     e.preventDefault();
     let j = i;
-    if (k === "ArrowDown" || k === "ArrowRight") j = (i + 1) % TABS.length;
-    else if (k === "ArrowUp" || k === "ArrowLeft") j = (i - 1 + TABS.length) % TABS.length;
-    else if (k === "Home") j = 0; else j = TABS.length - 1;
-    show(TABS[j]); $("t-" + TABS[j]).focus();
+    if (k === "ArrowDown" || k === "ArrowRight") j = (i + 1) % RAIL_TABS.length;
+    else if (k === "ArrowUp" || k === "ArrowLeft") j = (i - 1 + RAIL_TABS.length) % RAIL_TABS.length;
+    else if (k === "Home") j = 0; else j = RAIL_TABS.length - 1;
+    show(RAIL_TABS[j]); $("t-" + RAIL_TABS[j]).focus();
   };
 });
+$("testBtn").onclick = () => show("test");
 (function () {
   let s = null; try { s = localStorage.getItem("ga-tab"); } catch (_) {}
   show(TABS.includes(s) ? s : "home");
@@ -472,32 +626,79 @@ function renderFocus(run) {
   const text = dets.filter(d => d.kind !== "picture");
 
   if (!run.thumb_data_url) {
-    box.innerHTML = `<div class="empty"><span class="big" aria-hidden="true">⌨</span>
-      This was a text-only check — there was no screen image to mark up.</div>`;
+    // "no image" is only true once the full run is in hand; before that the
+    // preview simply has not been fetched yet.
+    box.innerHTML = run._full
+      ? `<div class="empty"><span class="big" aria-hidden="true">⌨</span>
+         This was a text-only check — there was no screen image to mark up.</div>`
+      : `<div class="empty"><span class="big" aria-hidden="true">◌</span>
+         Loading this check’s evidence…</div>`;
     return;
   }
+  /* Risk tiers, shared by the overlay and the list below so a red box on the
+     picture and a red row in the text always mean the same thing.
+
+       alert  - at or above this child's limit; this is what raises an alert
+       warn   - matched a word rule but landed under the limit
+       quiet  - read, matched nothing
+
+     Region scores come from the lexicon only (see pipeline._mark_regions), so
+     a coloured row means "a word rule fired here", never "the model decided". */
+  const age = Number(run.child_age) || 10;
+  const limit = age <= 10 ? 0.55 : (age <= 13 ? 0.65 : 0.75);
+  const tierOf = d => {
+    if (d.kind === "picture") return "pic";
+    const sc = Number(d.score) || 0;
+    if (sc >= limit) return "alert";
+    if ((d.hits || []).length) return "warn";
+    return "quiet";
+  };
+  const OV = { pic: "ov-pic", alert: "ov-hit", warn: "ov-warn", quiet: "ov-q" };
+
   const shapes = dets.filter(d => Array.isArray(d.box) && d.box.length === 4).map(d => {
     const [x0, y0, x1, y1] = d.box;
-    const pic = d.kind === "picture", hot = !pic && Number(d.score) >= 0.5;
-    const tag = pic ? "picture → vision model"
-      : (hot ? `${esc((d.hits || [])[0] || d.category || "rule")} ${num(d.score)}` : "");
-    return `<div class="ov ${pic ? "ov-pic" : (hot ? "ov-hit" : "ov-q")}"
+    const t = tierOf(d);
+    const tag = t === "pic" ? "picture → vision model"
+      : (t === "quiet" ? "" : `${esc((d.hits || [])[0] || d.category || "rule")} ${num(d.score)}`);
+    return `<div class="ov ${OV[t]}"
       style="left:${x0*100}%;top:${y0*100}%;width:${(x1-x0)*100}%;height:${(y1-y0)*100}%"
       title="${esc(d.text || "")}">${tag ? `<span class="ov-tag">${tag}</span>` : ""}</div>`;
   }).join("");
 
-  /* A desktop OCR pass returns 40+ lines, mostly UI fragments. Rank by score so
-     the line that fired is first, and collapse the quiet tail to a count. */
-  const meaningful = text.filter(d => (d.text || "").trim().length > 1)
-    .sort((a, b) => Number(b.score) - Number(a.score));
-  const head = meaningful.slice(0, 10), rest = text.length - head.length;
-  const rows = head.length ? head.map(d => {
-    const hot = Number(d.score) >= 0.5;
-    return `<li class="${hot ? "hit" : ""}"><span class="t" title="${esc(d.text)}">${esc(d.text)}</span>
-      ${hot ? `<span class="why">${esc((d.hits || [])[0] || d.category || "")}</span>` : ""}
+  /* Every region is listed, not a top-10 slice. This panel exists to show a
+     parent exactly what was on the child's screen, and "+ 48 more regions
+     read" answers none of that. Anything that fired comes first so it cannot
+     be missed; the rest follow in reading order (top of screen to bottom),
+     which is how the screen itself reads. Single characters are dropped —
+     "x" and "G" off a tab strip are noise, not content. */
+  const RANK = { alert: 0, warn: 1, quiet: 2 };
+  const listed = text.filter(d => (d.text || "").trim().length > 1).sort((a, b) => {
+    const ra = RANK[tierOf(a)], rb = RANK[tierOf(b)];
+    if (ra !== rb) return ra - rb;
+    if (ra < 2) return Number(b.score) - Number(a.score);
+    const ba = a.box || [0, 0], bb = b.box || [0, 0];
+    return (ba[1] - bb[1]) || (ba[0] - bb[0]);
+  });
+  const nAlert = listed.filter(d => tierOf(d) === "alert").length;
+  const nWarn = listed.filter(d => tierOf(d) === "warn").length;
+
+  const rows = listed.length ? listed.map(d => {
+    const t = tierOf(d);
+    const label = t === "alert" ? (esc((d.hits || [])[0] || d.category || "rule"))
+      : (t === "warn" ? esc((d.hits || [])[0] || "word rule") : "");
+    return `<li class="${t === "alert" ? "hit" : (t === "warn" ? "warn" : "")}">
+      <span class="t">${esc(d.text)}</span>
+      ${label ? `<span class="why">${label}</span>` : ""}
       <span class="s">${num(d.score)}</span></li>`;
-  }).join("") + (rest > 0 ? `<li><span class="t" style="color:var(--faint)">+ ${rest} more region${rest === 1 ? "" : "s"} read, nothing matched</span></li>` : "")
+  }).join("")
     : `<li><span class="t" style="color:var(--muted)">No readable text in this frame.</span></li>`;
+
+  const summary = `<div class="readsum">
+    <span class="pill"><b>${listed.length}</b> region${listed.length === 1 ? "" : "s"} read</span>
+    ${nAlert ? `<span class="pill alert"><b>${nAlert}</b> at or over the limit</span>` : ""}
+    ${nWarn ? `<span class="pill warn"><b>${nWarn}</b> matched a word rule</span>` : ""}
+    ${!nAlert && !nWarn ? `<span class="pill">nothing matched a word rule</span>` : ""}
+  </div>`;
 
   box.innerHTML = `<div class="focus">
     <div>
@@ -505,13 +706,14 @@ function renderFocus(run) {
         alt="Blurred screen preview with the regions the engine read marked" />${shapes}</div>
       <div class="legend">
         <span><i class="lg-q"></i>read, matched nothing</span>
-        <span><i class="lg-hit"></i>matched a word rule</span>
+        <span><i class="lg-warn"></i>matched a word rule</span>
+        <span><i class="lg-hit"></i>at or over this child’s limit</span>
         <span><i class="lg-pic"></i>sent to the vision model</span>
       </div>
     </div>
     <div>
       <h3 style="font-size:13px">What it read</h3>
-      <p style="font-size:12.5px;color:var(--muted);margin:3px 0 11px">Highest-scoring regions first.</p>
+      ${summary}
       <ul class="rows">${rows}</ul>
       ${(run.image_caption || "").trim() ? `<div class="quote"><b>Vision model described the picture as</b>${esc(run.image_caption)}</div>` : ""}
       ${(run.transcript_snippet || "").trim() ? `<div class="quote"><b>Speech heard</b>${esc(run.transcript_snippet)}</div>` : ""}
@@ -649,13 +851,452 @@ function renderPreviewNote(p) {
   }
 }
 
+/* ---------- white box: the pipeline as it actually runs ----------
+   Everything here is drawn from /api/whitebox — `modules` says which model is
+   loaded behind each box, and the latest trace's `steps` say what that box did
+   on the last check. Nothing is hardcoded about whether a stage "works": a box
+   is dashed because the backend reported "none", not because we assumed it. */
+
+/* Layout mirrors pipeline._run() step for step. Four things worth stating,
+   because each was wrong in an earlier draft of this diagram and each is
+   load-bearing:
+
+   1. The vision-language model's output is *words*, and those words go to the
+      TEXT scorer, not the picture scorer. _run scores read_blob and
+      picture_words separately and keeps whichever is higher — concatenating
+      them was measured to drag a 0.9961 meme down to 0.70.
+   2. "Join the words" is a real step, not a drawing convenience:
+      read_blob = " ".join(overlay_text, ocr_text, transcript).
+   3. The CLIP embed is not a reader alongside OCR. It runs inside the Stage-1
+      window, and _score_picture embeds a second time after cropping to the
+      picture region — hence "whole frame, then crop".
+   4. There is an escalation gate. Stage 2 only re-reads the full text when
+      Stage 1 clears STAGE1_THETA; otherwise its fusion is a preview and the
+      risk stays the Stage-1 text score.
+
+   Edges are routed orthogonally through the gaps between columns rather than
+   as diagonals. Diagonals crossed straight through the boxes they passed, and
+   a line that disappears behind a node is a line you cannot follow. */
+
+const WB_H = 62;
+const WB_THETA = 0.35;          // STAGE1_THETA in analyst/stage1
+const WB_COLS = [
+  { x: 8,    w: 136, label: "Sources" },
+  { x: 180,  w: 166, label: "Readers" },
+  { x: 382,  w: 202, label: "Assemble" },
+  { x: 620,  w: 176, label: "Stage 1 · scoring" },
+  { x: 832,  w: 164, label: "Merge & gate" },
+  { x: 1032, w: 160, label: "Stage 2" },
+  { x: 1228, w: 152, label: "Decision" }
+];
+
+/* step: the trace/live stage id that drives this box's status.
+   backend: the module key whose loaded model sits behind it. */
+const WB_NODES = [
+  // --- sources -------------------------------------------------------------
+  { id:"screen",  col:0, y:88,  step:"capture", live:"capture",     backend:"screen", title:"Screen frame", primary:true },
+  { id:"speaker", col:0, y:268, step:"audio",   live:"audio",       backend:null,     title:"Speaker audio", sub:"loopback" },
+  { id:"typed",   col:0, y:348, step:null,      live:null,          backend:null,     title:"Typed message", sub:"manual input" },
+  // --- readers (extract) ---------------------------------------------------
+  { id:"ocr",     col:1, y:24,  step:"ocr",     live:"ocr",         backend:"ocr",            title:"Read the text", primary:true },
+  { id:"vlm",     col:1, y:140, step:"vlm",     live:"vlm",         backend:"vision_meaning", title:"Describe picture", primary:true },
+  { id:"asr",     col:1, y:268, step:"audio",   live:"audio",       backend:"asr",            title:"Speech to text", primary:true },
+  // --- assemble ------------------------------------------------------------
+  { id:"join",    col:2, y:88,  step:"stage1",  live:"s1_join",     backend:null, title:"Join the words", sub:"typed + screen + speech" },
+  // --- stage 1 -------------------------------------------------------------
+  { id:"jwords",  col:3, y:24,  step:"stage1",  live:"s1_words",    backend:"text_fast",  title:"Score the words" },
+  { id:"jpicw",   col:3, y:140, step:"stage1",  live:"s1_picwords", backend:"text_fast",  title:"Score picture words" },
+  { id:"embed",   col:3, y:216, step:"clip",    live:"clip",        backend:"clip",       title:"Embed the picture", sub2:"whole frame, then crop", primary:true },
+  { id:"jpic",    col:3, y:312, step:"stage1",  live:"s1_picture",  backend:"image_fast", title:"Score the picture" },
+  // --- merge + escalation gate ---------------------------------------------
+  { id:"strong",  col:4, y:60,  step:"stage1",  live:"s1_merge",    backend:null, title:"Keep the stronger", sub:"higher of the two", primary:true },
+  { id:"gate",    col:4, y:250, step:"stage1",  live:"s1_gate",     backend:null, title:"Escalate?", sub:"score ≥ " + WB_THETA, shape:"gate" },
+  // --- stage 2 -------------------------------------------------------------
+  { id:"reread",  col:5, y:60,  step:"stage2",  live:"s2_reread",   backend:"text_full", title:"Re-read full text", sub2:"only when escalated" },
+  { id:"fuse",    col:5, y:180, step:"stage2",  live:"s2_fuse",     backend:null, title:"Weigh together", sub:"calibrated only", primary:true },
+  // --- decision ------------------------------------------------------------
+  { id:"decide",  col:6, y:150, step:"decide",  live:"decide",      backend:null, title:"Decision", sub:"vs the age limit" }
+];
+
+/* [from, to, conditional] — a conditional path is drawn dashed; the condition
+   itself is stated on the node it constrains, because a 36px column gap is not
+   wide enough to letter an edge without the text landing on a box. */
+const WB_EDGES = [
+  ["screen","ocr"], ["screen","vlm"], ["screen","embed"],
+  ["speaker","asr"],
+  ["typed","join"], ["ocr","join"], ["asr","join"],
+  ["join","jwords"],
+  ["vlm","jpicw"],
+  ["embed","jpic"],
+  ["jwords","strong"], ["jpicw","strong"],
+  ["strong","gate"], ["jpic","gate"],
+  ["strong","reread"],
+  ["gate","reread", true],
+  ["reread","fuse"],
+  ["jpic","fuse", true],
+  ["fuse","decide"]
+];
+const WB_BY_ID = {}; WB_NODES.forEach(n => WB_BY_ID[n.id] = n);
+
+/* What to call a stage in the live status line. Several boxes can share one
+   stage id, so the stage needs a name of its own. */
+const WB_STAGE_LABELS = {
+  capture: "grabbing the screen",
+  ocr:     "reading the text",
+  audio:   "transcribing speech",
+  vlm:     "describing the picture",
+  clip:    "embedding the picture",
+  stage1:  "Stage 1 scan",
+  stage2:  "Stage 2 fusion",
+  decide:  "deciding",
+  // fine-grained sub-steps, so the status line can say which part of a stage
+  s1_join:     "joining the words",
+  s1_words:    "scoring the words",
+  s1_picwords: "scoring the picture's words",
+  s1_merge:    "keeping the stronger",
+  s1_picture:  "scoring the picture",
+  s1_gate:     "checking the gate",
+  s2_reread:   "re-reading the full text",
+  s2_fuse:     "weighing the signals"
+};
+
+const wbGeom = n => {
+  const c = WB_COLS[n.col];
+  return { x:c.x, y:n.y, w:c.w, h:WB_H, cx:c.x + c.w/2, cy:n.y + WB_H/2 };
+};
+
+const wbArrow = (x, y) => `M ${x - 7} ${y - 4} L ${x} ${y} L ${x - 7} ${y + 4} Z`;
+const wbArrowDown = (x, y) => `M ${x - 4} ${y - 7} L ${x} ${y} L ${x + 4} ${y - 7} Z`;
+
+/* Orthogonal routing: out of the source, down or up inside the gap between
+   two columns, then into the target. Same-column edges are sub-steps of one
+   phase and simply drop straight down. */
+function wbEdgePath(a, b) {
+  const g1 = wbGeom(a), g2 = wbGeom(b);
+  if (a.col === b.col) {
+    const x = g1.cx, yTop = g1.y + g1.h, yBot = g2.y;
+    return { d: `M ${x} ${yTop} L ${x} ${yBot - 7}`, head: wbArrowDown(x, yBot),
+             lx: x + 6, ly: (yTop + yBot) / 2 + 3, anchor: "start" };
+  }
+  const x1 = g1.x + g1.w, y1 = g1.cy, x2 = g2.x, y2 = g2.cy;
+  if (Math.abs(y1 - y2) < 2) {
+    return { d: `M ${x1} ${y1} L ${x2 - 7} ${y1}`, head: wbArrow(x2, y1),
+             lx: (x1 + x2) / 2, ly: y1 - 7, anchor: "middle" };
+  }
+  // Vertical run sits in the gap immediately right of the source column, so it
+  // never travels through a column band where a box could be sitting.
+  const gapL = WB_COLS[a.col].x + WB_COLS[a.col].w;
+  const gapR = WB_COLS[a.col + 1].x;
+  const cx = (gapL + gapR) / 2;
+  const r = 9, dir = y2 > y1 ? 1 : -1;
+  const d = `M ${x1} ${y1} L ${cx - r} ${y1} Q ${cx} ${y1} ${cx} ${y1 + dir * r}`
+          + ` L ${cx} ${y2 - dir * r} Q ${cx} ${y2} ${cx + r} ${y2} L ${x2 - 7} ${y2}`;
+  return { d, head: wbArrow(x2, y2), lx: (cx + x2) / 2, ly: y2 - 8, anchor: "middle" };
+}
+
+/* "lexicon+hf:roberta-…+hf:toxic-bert" is true but unreadable on a 168px box. */
+function wbShort(v) {
+  if (!v || v === "none" || v === "deferred") return "not installed";
+  const parts = String(v).split("+");
+  const first = parts[0].split(":").pop();
+  if (parts.length === 1) return first.length > 20 ? first.slice(0, 19) + "…" : first;
+  return `${first} + ${parts.length - 1} model${parts.length > 2 ? "s" : ""}`;
+}
+
+function wbNodeStatus(n, stepById, modules) {
+  if (n.backend) {
+    const v = String(modules[n.backend] ?? "none");
+    if (v === "none" || v === "deferred" || v.endsWith("_failed")) return "off";
+  }
+  if (!n.step) return "idle";
+  const st = stepById[n.step];
+  return st ? String(st.status || "idle") : "idle";
+}
+
+/* A gateway is a hexagon, the way any flow diagram marks a branch — it must
+   not read as just another processing box. */
+function wbShapePath(g, shape) {
+  if (shape !== "gate") return "";
+  const k = 15;
+  return `M ${g.x + k} ${g.y} L ${g.x + g.w - k} ${g.y} L ${g.x + g.w} ${g.cy}`
+       + ` L ${g.x + g.w - k} ${g.y + g.h} L ${g.x + k} ${g.y + g.h} L ${g.x} ${g.cy} Z`;
+}
+
+function wbSvg(stepById, modules) {
+  const cols = WB_COLS.map(c =>
+    `<text class="wbcol" x="${c.x}" y="13">${esc(c.label)}</text>`).join("");
+
+  const edges = WB_EDGES.map(([a, b, cond]) => {
+    const p = wbEdgePath(WB_BY_ID[a], WB_BY_ID[b]);
+    return `<path class="wbedge${cond ? " cond" : ""}" data-edge="${a}-${b}" d="${p.d}" />
+      <path class="wbhead${cond ? " cond" : ""}" data-edge="${a}-${b}" d="${p.head}" />`;
+  }).join("");
+
+  const nodes = WB_NODES.map(n => {
+    const g = wbGeom(n);
+    const st = n.step ? stepById[n.step] : null;
+    const status = wbNodeStatus(n, stepById, modules);
+    const sub = n.sub || wbShort(modules[n.backend]);
+    /* Several boxes share one trace step (all of Stage 1 is timed as a whole),
+       so only the box that owns the measurement shows it. Repeating the same
+       number on four boxes would read as four separate costs. */
+    const ms = (n.primary && st && Number(st.ms)) ? `${Math.round(st.ms)} ms` : "";
+    const full = n.backend ? String(modules[n.backend] ?? "none") : (n.sub || "");
+    const path = wbShapePath(g, n.shape);
+    const box = path
+      ? `<path class="wbpulse" d="${path}" style="transform-origin:${g.cx}px ${g.cy}px" />
+         <path class="wbbox" d="${path}" />`
+      : `<rect class="wbpulse" x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="9"
+           style="transform-origin:${g.cx}px ${g.cy}px" />
+         <rect class="wbbox" x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="9" />`;
+    const third = n.sub2
+      ? `<text class="wbsub2" x="${g.x + 12}" y="${g.y + 54}">${esc(n.sub2)}</text>` : "";
+    return `<g class="wbnode n-${status}" data-node="${n.id}">
+      <title>${esc(n.title)}${full ? " — " + esc(full) : ""}${st ? " — " + esc(st.detail || st.status) : ""}</title>
+      ${box}
+      <text class="wbtitle" x="${g.x + 12}" y="${g.y + 24}">${esc(n.title)}</text>
+      <text class="wbsub"   x="${g.x + 12}" y="${g.y + 41}">${esc(sub)}</text>
+      ${third}
+      <text class="wbms"    x="${g.x + g.w - 11}" y="${g.y + 41}" text-anchor="end">${esc(ms)}</text>
+    </g>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 1388 424" role="img"
+    aria-label="Pipeline. The screen frame is read by OCR, described by the vision-language model, and embedded by CLIP; speaker audio is transcribed. Typed, screen and speech text are joined and scored, the picture description is scored separately as text, and the stronger of the two is kept. The picture is scored on its own channel. An escalation gate decides whether Stage 2 re-reads the full text before the signals are weighed together and checked against the age limit.">
+    ${edges}${cols}${nodes}</svg>`;
+}
+
+function wbStepList(trace) {
+  const steps = (trace && trace.steps) || [];
+  if (!steps.length) {
+    return `<p class="note">No check has run yet. Start monitoring, or use
+      <b>Test a message</b> in the bottom-left, and the run will appear here.</p>`;
+  }
+  const max = Math.max(1, ...steps.map(s => Number(s.ms) || 0));
+  return steps.map((s, i) => {
+    const ms = Number(s.ms) || 0;
+    return `<div class="wbstep s-${esc(s.status)}" data-step="${esc(s.id)}">
+      <span class="dot" aria-hidden="true"></span>
+      <span><span class="lbl">${i + 1}. ${esc(s.label)}</span>
+        <span class="det"> — ${esc(s.detail || s.status)}</span>
+        <span class="wbbar"><i style="width:${(100 * ms / max).toFixed(1)}%"></i></span></span>
+      <span class="ms">${ms.toFixed(0)} ms</span>
+    </div>`;
+  }).join("");
+}
+
+/* ---- replay: walk the steps in the order they really ran ---- */
+let wbToken = 0;
+const wbWait = ms => new Promise(r => setTimeout(r, ms));
+const wbEls = sel => Array.from(document.querySelectorAll(sel));
+
+function wbMark(stepId, on) {
+  WB_NODES.filter(n => n.step === stepId).forEach(n => {
+    const g = document.querySelector(`[data-node="${n.id}"]`);
+    if (g) g.classList.toggle("n-firing", on);
+    WB_EDGES.filter(e => e[1] === n.id).forEach(e =>
+      wbEls(`[data-edge="${e[0]}-${e[1]}"]`).forEach(el => el.classList.toggle("live", on)));
+  });
+  const row = document.querySelector(`.wbstep[data-step="${stepId}"]`);
+  if (row) row.classList.toggle("now", on);
+}
+
+async function wbReplay(trace) {
+  const token = ++wbToken;
+  const steps = (trace && trace.steps) || [];
+  if (!steps.length) return;
+  wbEls(".wbnode").forEach(n => n.classList.remove("n-firing"));
+  wbEls(".wbedge").forEach(e => e.classList.remove("live"));
+  wbEls(".wbstep").forEach(e => e.classList.remove("now"));
+  for (const st of steps) {
+    if (token !== wbToken) return;
+    wbMark(st.id, true);
+    // Slow steps linger longer, but a 16 s OCR must not stall the animation.
+    await wbWait(Math.max(260, Math.min(950, 260 + (Number(st.ms) || 0) / 12)));
+    wbMark(st.id, false);
+    if (token !== wbToken) return;
+  }
+}
+
+let wbSig = "", wbSeen = null, wbTrace = null;
+function renderWhitebox(wb) {
+  const modules = (wb && wb.modules) || {};
+  const trace = (wb && wb.last_trace) || null;
+  wbTrace = trace;
+  const stepById = {};
+  ((trace && trace.steps) || []).forEach(s => { stepById[s.id] = s; });
+
+  const key = (trace && (trace.run_id || trace.ts)) || "none";
+  /* Rebuilding the SVG on every poll would restart any running animation, so
+     only touch the DOM when the check or the loaded models actually changed. */
+  const sig = key + "|" + JSON.stringify(modules);
+  if (sig !== wbSig) {
+    wbSig = sig;
+    $("wbDiagram").innerHTML = wbSvg(stepById, modules);
+    $("wbSteps").innerHTML = wbStepList(trace);
+  }
+
+  wbApplyLive(wb);
+
+  const tag = $("wbTag");
+  if (!trace) { tag.textContent = "waiting for a check"; tag.className = "pill"; }
+  else if (trace.decision === "hate") { tag.textContent = "last check: alert"; tag.className = "pill warn"; }
+  else { tag.textContent = "last check: clear"; tag.className = "pill ok"; }
+
+  $("wbCaption").innerHTML = trace
+    ? `The words on screen and the words the vision model reads <i>out of</i> a picture are
+       scored separately, and the stronger of the two is kept — blending them was measured
+       to weaken detection. The picture itself is scored on its own channel. Stage 2 only
+       re-reads the full text when Stage 1 clears ${WB_THETA}; otherwise its fusion is a preview
+       and the risk stays the Stage-1 score. Dashed arrows are conditional paths, a dashed
+       box is a model that is not installed, a faded one did not run on this check.
+       Last check on <b>${esc(String((trace.app && trace.app.exe) || "—"))}</b> ·
+       ${Math.round(Number(trace.total_ms) || 0)} ms end to end.`
+    : `Start monitoring, or use <b>Test a message</b> in the bottom-left corner.`;
+
+  wbSeen = key;
+}
+
+/* ---- live: what is executing at this instant ----
+   Applied in place rather than by re-rendering, because rebuilding the SVG
+   every 600 ms would restart every CSS animation on it. The trace gives each
+   box its resting colour; this gives the one that is running right now. */
+/* Sub-steps like the max() merge finish in a fraction of a millisecond;
+   rounding those to "0 ms" reads as "did not run". */
+const wbMs = v => (Number(v) < 1 ? "<1 ms" : `${Math.round(v)} ms`);
+
+function wbApplyLive(wb) {
+  const live = (wb && wb.live) || {};
+  const active = live.active || {};
+  const doneMs = live.last_ms || {};
+  const marks = live.marks || {};
+  const busy = !!live.busy;
+  /* Durations survive until the next check starts, so they stay on screen
+     after one finishes. Previously the diagram dropped them the moment a check
+     ended and reverted to the coarse trace view, which is the flash-then-blank
+     effect: everything lit at once, then vanished. */
+  const haveTimings = Object.keys(doneMs).length > 0;
+  const isRunning = id => id && Object.prototype.hasOwnProperty.call(active, id);
+  const isDone = id => id && Object.prototype.hasOwnProperty.call(doneMs, id);
+
+  WB_NODES.forEach(n => {
+    const g = document.querySelector(`[data-node="${n.id}"]`);
+    if (!g) return;
+    const run = isRunning(n.live), done = isDone(n.live);
+    /* While a check is in flight the diagram fills in: everything starts
+       dimmed, the running step pulses, and finished steps stay lit with their
+       own duration. Several sub-steps take single-digit milliseconds, so a
+       poll will never catch them running — but it always sees them done, which
+       is why "done" and not just "running" drives the picture. */
+    g.classList.toggle("n-running", run);
+    g.classList.toggle("n-done", done && !run);
+    // Only dim what has not run *yet*; once the check is over nothing is
+    // "pending" any more, it simply did or did not take part.
+    g.classList.toggle("n-pending", busy && !done && !run);
+    /* After a check, a box with no duration did not take part — the re-read is
+       skipped unless Stage 1 escalated, the audio path is idle when nothing is
+       playing. That is different from "has not run yet" and must not look the
+       same as a box that simply has no data. */
+    g.classList.toggle("n-notrun", !busy && haveTimings && !done && !run);
+
+    const ms = g.querySelector(".wbms");
+    if (ms) {
+      // Each box owns its own measurement, so this is that box's time and not
+      // a stage total copied onto everything that shares the stage. A box that
+      // has not run yet in *this* check shows nothing rather than the previous
+      // check's number, which would read as "already done".
+      if (run) ms.textContent = wbMs(active[n.live]);
+      else if (done) ms.textContent = wbMs(doneMs[n.live]);
+      else if (busy || haveTimings) ms.textContent = "";
+    }
+
+    WB_EDGES.filter(e => e[1] === n.id).forEach(e =>
+      wbEls(`[data-edge="${e[0]}-${e[1]}"]`).forEach(el => el.classList.toggle("live", run)));
+  });
+
+  /* The step list below is keyed on the coarse trace ids, but the pipeline now
+     marks fine sub-steps, so map back up through the boxes. */
+  const coarseActive = new Set(
+    WB_NODES.filter(n => isRunning(n.live)).map(n => n.step).filter(Boolean));
+  wbEls(".wbstep").forEach(r => r.classList.toggle("now", coarseActive.has(r.dataset.step)));
+
+  /* Stage 1 skips the language models entirely when the lexicon has already
+     decided, so the box must not keep advertising models that did not run. */
+  const jw = document.querySelector('[data-node="jwords"] .wbsub');
+  if (jw && Object.prototype.hasOwnProperty.call(marks, "s1_models_ran")) {
+    jw.textContent = marks.s1_models_ran
+      ? wbShort((wb.modules || {}).text_fast)
+      : "lexicon decided alone";
+  }
+
+  const el = $("wbNow");
+  if (busy) {
+    const names = Object.keys(active).map(k => WB_STAGE_LABELS[k] || k);
+    el.className = "wbnow busy";
+    el.innerHTML = `<i></i>checking now · ${(live.busy_ms / 1000).toFixed(1)}s` +
+      (names.length ? ` · ${esc(names.join(", "))}` : " · finishing");
+  } else if (wb && wb.capturing) {
+    el.className = "wbnow armed";
+    el.innerHTML = `<i></i>monitoring · next check in ${Number(wb.next_check_in_s || 0).toFixed(0)}s`;
+  } else {
+    el.className = "wbnow";
+    el.innerHTML = `<i></i>monitoring is off — showing the last check`;
+  }
+}
+
+/* ---- fast poll, only while the tab is open ----
+   /api/status + /api/runs on the 3s loop drag ~2.4 MB of thumbnails with them;
+   /api/whitebox measures ~4 ms, so live state gets its own quick timer rather
+   than riding along with that. */
+async function wbPoll() {
+  if ($("p-wb").hidden) { wbPollStop(); return; }
+  try {
+    const wb = await api("/api/whitebox");
+    renderWhitebox(wb);
+    // Sub-steps run in milliseconds, so a check needs a faster cadence than an
+    // idle gap does. Re-arm only when the rate actually changes.
+    const want = (wb.live && wb.live.busy) ? 300 : 900;
+    if (want !== wbRate) { wbRate = want; clearInterval(wbTimer); wbTimer = setInterval(wbPoll, want); }
+  } catch (_) {}
+}
+function wbPollStart() { if (!wbTimer) { wbRate = 900; wbTimer = setInterval(wbPoll, wbRate); wbPoll(); } }
+function wbPollStop() { if (wbTimer) { clearInterval(wbTimer); wbTimer = null; wbRate = 0; } }
+
+$("wbReplay").onclick = () => wbReplay(wbTrace);
+
 /* ---------- refresh ---------- */
+/* /api/runs now returns headlines only — the preview image, the trace and the
+   per-region detections are fetched for the one selected run. Serving all of
+   it forty times over, every three seconds, was 63 MB a minute of localhost
+   traffic to draw a list. */
+const detailCache = new Map();
+const DETAIL_CACHE_MAX = 40;
+async function loadDetail(id) {
+  if (!id || detailCache.has(id)) return detailCache.get(id) || null;
+  try {
+    const full = await api(`/api/runs/${encodeURIComponent(id)}`);
+    full._full = true;
+    detailCache.set(id, full);
+    while (detailCache.size > DETAIL_CACHE_MAX) {
+      detailCache.delete(detailCache.keys().next().value);
+    }
+    return full;
+  } catch (_) { return null; }
+}
+
 function paint() {
   // Live by default; only an explicit pick from the list freezes the view.
   if (!pinned || !runs.some(r => r.id === selected)) selected = runs.length ? runs[0].id : null;
   renderFeed();
-  const run = runs.find(r => r.id === selected) || null;
+  const light = runs.find(r => r.id === selected) || null;
+  const run = (light && detailCache.get(light.id)) || light;
   renderFocus(run); renderWhy(run);
+  if (light && !run._full) {
+    // Re-render once the detail lands, unless the pick moved on meanwhile.
+    loadDetail(light.id).then(full => {
+      if (full && full.id === selected) { renderFocus(full); renderWhy(full); }
+    });
+  }
   const live = $("liveTag");
   if (live) {
     live.textContent = pinned ? "showing a pinned check" : "showing the latest check";
@@ -672,6 +1313,8 @@ async function refresh() {
     $("detBadge").hidden = !alerts; $("detBadge").textContent = alerts;
     renderPreviewNote(st.preview || {});
     renderHome(st); renderHealth(st); paint();
+    /* The white box has its own faster timer (wbPollStart) — it must not be
+       driven from here, where it would inherit this loop's 3s cadence. */
   } catch (e) {
     showErr("Cannot reach the Analyst service. Is `python -m analyst.serve` still running?");
     renderHome({ protection: "degraded", stats: {}, backends: {} });
@@ -683,10 +1326,14 @@ $("age").onchange = () => {
   $("sensNote").textContent =
     `An alert is raised at ${num(LIMITS[$("age").value])} or above. Younger ages use a lower limit, so more is flagged.`;
 };
+/* Measured over 92 real checks on a 1920x1080 desktop: half take over 6.4s,
+   one in ten over 9.3s, and the slowest ran 38s. The screen is also read on
+   this process, so while a check runs the panel itself stops responding.
+   Intervals are therefore spaced against that cost, not against a wish. */
 $("interval").onchange = () => {
   const v = Number($("interval").value);
-  $("speedNote").textContent = v < 20
-    ? "Note: a full-screen check takes roughly 7 seconds, longer with the meme reader on. Overlapping checks are skipped, so the real rate will be slower than this setting."
+  $("speedNote").textContent = v < 30
+    ? "Note: a full-screen check takes about 6-9 seconds, longer with the meme reader on. At this spacing checks will sometimes still be running when the next is due — those are skipped, and the panel is unresponsive while one runs."
     : "";
 };
 $("age").onchange(); $("interval").onchange();
