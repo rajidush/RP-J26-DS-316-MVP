@@ -469,4 +469,11 @@ def reset_guard_state():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("main:app", host="127.0.0.1", port=port, reload=True)
+    # reload=True runs the app inside a child process spawned by a reloader
+    # parent. Killing the parent on Windows does not take the child with it:
+    # it stays alive holding port 8000 and still running the Zero-Trust Guard
+    # capture thread, so the machine goes on writing screenshots to
+    # captured_frames/ with no visible process to stop. It also restarts screen
+    # capture on every file save. Opt in when you actually want auto-reload.
+    reload = os.getenv("BACKEND_RELOAD", "0").strip().lower() in ("1", "true", "yes")
+    uvicorn.run("main:app", host="127.0.0.1", port=port, reload=reload)
