@@ -101,8 +101,46 @@ def category_from_labels(rows: List[dict]) -> Optional[str]:
     return LABEL_TO_CATEGORY[best_name]
 
 
+# Windowing for label_scores(). A 128-token head cannot see a whole desktop, and
+# OCR chrome (tab titles, a long file:// URL) reliably fills the first hundreds
+# of characters before any page content. 300 chars is deliberately below the
+# ~512 that 128 tokens buys on clean prose, because OCR noise and URLs tokenise
+# far worse than prose. The cap bounds worst-case latency on a very busy screen.
+_WINDOW_CHARS = int(os.environ.get("ANALYST_TEXT_WINDOW", "300"))
+_WINDOW_OVERLAP = int(os.environ.get("ANALYST_TEXT_WINDOW_OVERLAP", "60"))
+_MAX_WINDOWS = int(os.environ.get("ANALYST_TEXT_MAX_WINDOWS", "16"))
+
+
 class HfTextClassifier:
-    """Lazy CPU text-classification head. Never raises into the cascade."""
+    """Lazy CPU text-classification head. Never raises into the cascade.
+
+    Why the input is windowed, not truncated (measured 1 Sep 2026)
+    -------------------------------------------------------------
+    `label_scores` used to score `text[:512]`. On a screen blob that is the
+    wrong 512 characters: OCR emits browser chrome first — tab titles, then a
+    `file://` URL that can be 150 chars on its own — and the content the child
+    is actually looking at lands after it. Holding the text identical and only
+    moving the slur later in the blob:
+
+        chrome before slur    slur at char    score    verdict (theta 0.55)
+                       0               36    0.9959    flags
+                     370              406    0.5531    flags, barely
+                     740              776    0.0800    MISSES
+                    1110             1146    0.0800    MISSES
+
+    0.0800 is the lexicon floor: past the cut the model contributes nothing at
+    all. This was not hypothetical — a research PDF of captioned hateful memes
+    scored 0.08 with `Language model 0.00 / nothate 1.00` while OCR had in fact
+    read "fuckthis somali piece ofshit" into the blob at char 317.
+
+    Note the middle row: even *inside* the window, surrounding chrome dilutes
+    the score (0.9985 for the slur alone vs 0.6173 for the same slur embedded
+    in a desktop blob). Windowing fixes both — each window is mostly one kind
+    of content, and the most harmful one decides.
+
+    Stage 2 already re-read what Stage 1 truncated, but it only runs on
+    escalation, so a Stage-1 miss meant it never got the chance.
+    """
 
     def __init__(
         self,
@@ -164,17 +202,57 @@ class HfTextClassifier:
             self.name = "unavailable"
             return False
 
+    def _windows(self, text: str) -> List[str]:
+        """Overlapping character windows covering the whole blob.
+
+        A screen blob is not a document: the harmful line can sit anywhere in
+        it, usually *after* the browser chrome. Scoring only the head is what
+        the old `text[:512]` did, and it silently lost real hate — see the
+        measurement in the class docstring. The overlap exists so a phrase
+        straddling a boundary is still whole in one window.
+        """
+        text = (text or "").strip()
+        if len(text) <= _WINDOW_CHARS:
+            return [text]
+        step = _WINDOW_CHARS - _WINDOW_OVERLAP
+        out: List[str] = []
+        for start in range(0, len(text), step):
+            chunk = text[start:start + _WINDOW_CHARS]
+            if chunk.strip():
+                out.append(chunk)
+            if len(out) >= _MAX_WINDOWS:
+                break
+        return out
+
     def label_scores(self, text: str) -> List[dict]:
+        """Labels for the most harmful window, not for the first 512 chars.
+
+        Windows are scored in one batched call, so the extra coverage costs a
+        larger batch rather than N round trips.
+        """
         if not (text or "").strip() or not self._ensure_loaded():
             return []
+        windows = self._windows(text)
         try:
-            out = self._pipe(text[:512])
+            out = self._pipe(windows)
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"[:200]
             return []
         if not out:
             return []
-        return out[0] if isinstance(out[0], list) else out
+        # A list input yields one entry per window; each entry is the full
+        # label distribution because the pipeline is built with top_k=None.
+        per_window: List[List[dict]] = []
+        for entry in out:
+            if isinstance(entry, list):
+                per_window.append(entry)
+            elif isinstance(entry, dict):
+                per_window.append([entry])
+        if not per_window:
+            return []
+        if len(per_window) == 1:
+            return per_window[0]
+        return max(per_window, key=lambda rows: hate_score_from_labels(rows) or 0.0)
 
     def score(self, text: str) -> Optional[float]:
         """Hate probability in [0,1], or None when unavailable/unrecognised."""

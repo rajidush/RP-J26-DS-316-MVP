@@ -17,79 +17,81 @@ Hardened:
 """
 
 
-
 from __future__ import annotations
-
 
 
 import hashlib
 
+
 import threading
+
 
 import time
 
+
 from datetime import datetime, timezone
+
 
 from typing import Callable, Optional, Tuple
 
 
-
 from analyst.capture.audio import LoopbackCapture
+
 
 from analyst.capture.process import get_foreground_app
 
+
 from analyst.capture.screen import ScreenCapture
+
 
 from analyst.pipeline import AnalystPipeline
 
+
 from analyst.store.db import AnalystStore
+
 
 from analyst.store.persist import persist_result
 
+
+from analyst.whitebox.live import LIVE, stage as live_stage
 from analyst.whitebox.trace import (
-
     TraceBuffer,
-
     build_trace_failed,
-
     build_trace_from_result,
-
     build_trace_skipped,
-
 )
 
 
-
+# Tick spacing.
+#
+# Measured over 92 real checks on a 1920x1080 desktop: p50 6.4s, p90 9.3s,
+# slowest 38.6s (OCR alone is p50 5.3s / p90 8.0s). A check also runs on the
+# API process, so the panel stops answering for its whole duration.
+#
+# The old default was 2.5s, which 87% of checks overran: every tick collided
+# with the one before it, got skipped, and left the UI permanently frozen —
+# the setting described a rate the engine could never deliver. 30s leaves the
+# panel responsive ~70% of the time at p90, which is what "monitoring" should
+# feel like. The floor is a hard rail: below it, overlap is guaranteed rather
+# than occasional.
+_DEFAULT_INTERVAL_S = 30.0
+_MIN_INTERVAL_S = 10.0
 
 
 def _now() -> str:
-
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="milliseconds")
 
 
-
-
-
 class CaptureWorker:
-
     def __init__(
-
         self,
-
         store: Optional[AnalystStore] = None,
-
         pipeline: Optional[AnalystPipeline] = None,
-
         screen: Optional[ScreenCapture] = None,
-
         audio: Optional[LoopbackCapture] = None,
-
         *,
-
         grab_frame: Optional[Callable[[], Tuple[Optional[bytes], int, int]]] = None,
-
         grab_audio: Optional[Callable[[], Tuple[Optional[bytes], float]]] = None,
-
     ) -> None:
 
         self.store = store or AnalystStore()
@@ -114,7 +116,7 @@ class CaptureWorker:
 
         self.child_age = 10
 
-        self.interval_s = 2.5
+        self.interval_s = _DEFAULT_INTERVAL_S
 
         self.app_exe = "Desktop"
 
@@ -132,6 +134,8 @@ class CaptureWorker:
 
         self._capturing = False
 
+        self._last_tick_end: Optional[float] = None
+
         self._last_frame_hash: Optional[str] = None
 
         self._consecutive_failures = 0
@@ -144,26 +148,24 @@ class CaptureWorker:
 
         self._last_frame_h = 0
 
-
-
     @property
 
     def capturing(self) -> bool:
-
         return self._capturing
-
-
 
     @property
 
     def trace_buffer(self) -> TraceBuffer:
-
         return self._trace
 
-
+    def _next_check_in(self) -> float:
+        """Seconds until the next tick is due, or 0 when one is running/idle."""
+        if not self._capturing or self._last_tick_end is None:
+            return 0.0
+        left = self.interval_s - (time.perf_counter() - self._last_tick_end)
+        return round(max(0.0, left), 1)
 
     def whitebox(self) -> dict:
-
         """Live blackbox → whitebox snapshot for the panel."""
 
         app = get_foreground_app()
@@ -173,131 +175,82 @@ class CaptureWorker:
         latest = self._trace.latest()
 
         return {
-
             "capturing": self._capturing,
-
             "current_app": app,
-
             "last_trace": latest,
-
             "traces": self._trace.list(limit=15),
-
             "recent_apps": self._trace.recent_apps(limit=8),
-
+            "live": LIVE.snapshot(),
+            "interval_s": self.interval_s,
+            "next_check_in_s": self._next_check_in(),
             "modules": {
-
                 "screen": self.screen.name,
-
                 "audio": self.audio.name,
-
                 "audio_running": self.audio.running,
-
                 **(self.pipeline.backends()),
-
             },
-
             "ticks": self.ticks,
-
             "skipped": self.skipped,
-
             "failures": self.failures,
-
         }
 
-
-
     def status(self) -> dict:
-
         latest = self.store.latest_run()
 
         protection = "idle"
 
         if self._capturing:
-
             protection = "guarding"
 
         if latest and latest.get("decision") == "hate":
-
             protection = "threat"
-
         elif self._consecutive_failures >= 3:
-
             protection = "degraded"
-
         elif self.last_error and "audio degraded" in self.last_error:
-
             protection = "guarding" if self._capturing else "idle"
 
-
-
         return {
-
             "capturing": self._capturing,
-
             "protection": protection,
-
             "child_age": self.child_age,
-
             "interval_s": self.interval_s,
-
+            "next_check_in_s": self._next_check_in(),
             "ticks": self.ticks,
-
             "skipped": self.skipped,
-
             "failures": self.failures,
-
             "last_error": self.last_error,
-
             "last_run_id": self.last_run_id,
-
             "last_ok_ts": self.last_ok_ts,
-
             "screen": self.screen.name,
-
             "audio": self.audio.name,
-
             "audio_running": self.audio.running,
-
             "backends": self.pipeline.backends(),
-
             "stats": self.store.stats(),
-
             "current_app": self._current_app,
-
             "product": "Guardian Analyst",
-
             "note": "Temporary C2 capture — C1 will own capture later.",
-
         }
 
-
-
-    def start(self, *, child_age: int = 10, interval_s: float = 2.5) -> dict:
-
+    def start(self, *, child_age: int = 10, interval_s: float = _DEFAULT_INTERVAL_S) -> dict:
         with self._lock:
-
             if self._capturing:
-
                 return self.status()
 
             if self._grab_frame is None and not self.screen.available:
-
                 self.last_error = self.screen.last_error or "screen capture unavailable (install mss)"
 
                 return self.status()
 
             self.child_age = int(child_age)
 
-            self.interval_s = max(2.0, float(interval_s))
+            self.interval_s = max(_MIN_INTERVAL_S, float(interval_s))
 
             self.last_error = ""
 
             self._consecutive_failures = 0
 
             if self._grab_audio is None:
-
                 if not self.audio.start():
-
                     self.last_error = f"audio degraded: {self.audio.last_error or 'loopback unavailable'}"
 
             self._stop.clear()
@@ -310,58 +263,39 @@ class CaptureWorker:
 
             return self.status()
 
-
-
     def stop(self) -> dict:
-
         with self._lock:
-
             self._stop.set()
 
             thread = self._thread
 
         if thread and thread.is_alive():
-
             thread.join(timeout=8.0)
 
         try:
-
             self.audio.stop()
-
         except Exception:
-
             pass
 
         with self._lock:
-
             self._capturing = False
 
             self._thread = None
 
         return self.status()
 
-
-
     def tick_once(self) -> Optional[str]:
-
         """One capture→analyse→persist cycle (also used by tests with injectors)."""
 
         if not self._tick_lock.acquire(blocking=False):
-
             return None
 
         try:
-
             return self._tick_once_unlocked()
-
         finally:
-
             self._tick_lock.release()
 
-
-
     def _tick_once_unlocked(self) -> Optional[str]:
-
         ts = _now()
 
         tick_num = self.ticks + self.skipped + self.failures + 1
@@ -371,8 +305,6 @@ class CaptureWorker:
         self._current_app = app
 
         self.app_exe = str(app.get("exe") or "Desktop")
-
-
 
         t_cap = time.perf_counter()
 
@@ -390,12 +322,8 @@ class CaptureWorker:
 
         screen_err = self.screen.last_error or ""
 
-
-
         if frame is None and audio_b is None:
-
             if self.screen.last_error:
-
                 self.last_error = f"screen: {self.screen.last_error}"
 
                 self._consecutive_failures += 1
@@ -403,113 +331,65 @@ class CaptureWorker:
                 self.failures += 1
 
                 self._trace.push(
-
                     build_trace_failed(
-
                         ts=ts,
-
                         tick=tick_num,
-
                         app=app,
-
                         error=self.last_error,
-
                         capture_ms=capture_ms,
-
                     )
-
                 )
 
             return None
 
-
-
         if frame is None and audio_b is not None and self.screen.last_error:
-
             self.last_error = f"screen: {self.screen.last_error}"
 
-
-
         if had_frame:
-
             self._last_frame_w, self._last_frame_h = fw, fh
-
-
 
         frame_hash = hashlib.sha1(frame).hexdigest() if frame else None
 
         if frame_hash and frame_hash == self._last_frame_hash and not audio_b:
-
             self.skipped += 1
 
             self._trace.push(
-
                 build_trace_skipped(ts=ts, tick=tick_num, app=app)
-
             )
 
             return self.last_run_id
 
-
-
         try:
-
             result = self.pipeline.analyze(
-
                 child_age=self.child_age,
-
                 image_bytes=frame,
-
                 audio_bytes=audio_b,
-
                 app_exe=self.app_exe,
-
                 app_category="desktop",
-
             )
 
             trace = build_trace_from_result(
-
                 ts=ts,
-
                 tick=tick_num,
-
                 run_id="",
-
                 app=app,
-
                 frame_w=fw if had_frame else self._last_frame_w,
-
                 frame_h=fh if had_frame else self._last_frame_h,
-
                 had_frame=had_frame,
-
                 had_audio=had_audio,
-
                 screen_ok=screen_ok,
-
                 screen_error=screen_err,
-
                 capture_ms=capture_ms,
-
                 result=result,
-
             )
 
             run_id = persist_result(
-
                 self.store,
-
                 result,
-
                 child_age=self.child_age,
-
                 app_exe=self.app_exe,
-
                 frame_bytes=frame,
-
                 trace=trace,
-
             )
 
             trace["run_id"] = run_id
@@ -527,23 +407,15 @@ class CaptureWorker:
             self._consecutive_failures = 0
 
             if result.decision != "hate":
-
                 if "audio degraded" in (self.last_error or ""):
-
                     pass
-
                 elif frame is None and self.screen.last_error:
-
                     self.last_error = f"screen: {self.screen.last_error}"
-
                 else:
-
                     self.last_error = ""
 
             return run_id
-
         except Exception as exc:
-
             self.last_error = str(exc)
 
             self._consecutive_failures += 1
@@ -551,73 +423,64 @@ class CaptureWorker:
             self.failures += 1
 
             self._trace.push(
-
                 build_trace_failed(
-
                     ts=ts,
-
                     tick=tick_num,
-
                     app=app,
-
                     error=str(exc),
-
                     capture_ms=capture_ms,
-
                 )
-
             )
 
             return None
 
-
-
     def _take_frame(self):
+        """Grabbing the screen is the first thing the panel's diagram shows."""
 
-        if self._grab_frame is not None:
+        with live_stage("capture"):
+            if self._grab_frame is not None:
+                return self._grab_frame()
 
-            return self._grab_frame()
-
-        return self.screen.grab_jpeg()
-
-
+            return self.screen.grab_jpeg()
 
     def _take_audio(self):
-
         if self._grab_audio is not None:
-
             return self._grab_audio()
 
         if not self.audio.running:
-
             return None, 0.0
 
         try:
-
             return self.audio.pull_wav_if_speech()
-
         except Exception as exc:
-
             self.last_error = f"audio degraded: {exc}"
 
             return None, 0.0
 
-
-
     def _run(self) -> None:
-
         while not self._stop.is_set():
-
             t0 = time.perf_counter()
 
-            self.tick_once()
+            try:
+                self.tick_once()
+            except Exception as exc:
+                # The loop has to outlive any single tick. _tick_once_unlocked
+                # guards the analyse-and-persist half, but everything before it
+                # — grabbing the frame, reading the foreground window, building
+                # the trace — was unguarded, and an escape there killed this
+                # thread outright. Nothing resets _capturing when that happens,
+                # so the panel kept showing "monitoring · next check in Ns"
+                # forever while no check ever ran again. Counting it instead
+                # feeds the existing backoff and surfaces as "degraded".
+                self._consecutive_failures += 1
+                self.last_error = f"tick crashed: {type(exc).__name__}: {exc}"[:200]
 
             elapsed = time.perf_counter() - t0
+
+            self._last_tick_end = time.perf_counter()
 
             backoff = min(15.0, 2.0 * self._consecutive_failures) if self._consecutive_failures else 0.0
 
             wait = max(0.2, self.interval_s - elapsed + backoff)
 
             self._stop.wait(wait)
-
-

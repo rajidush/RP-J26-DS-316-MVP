@@ -189,7 +189,46 @@ def build_evidence(result: AnalystRunResult) -> dict:
         "fusion_mode": result.fusion_mode or "idle",
         "escalated": bool(result.escalated),
         "explanation": result.explanation or "",
-        # Capped: a busy desktop can yield 50+ text lines and this rides along
-        # in every stored row.
-        "detections": list(result.detections or [])[:40],
+        "detections": _keep_detections(result.detections),
     }
+
+
+# A 1920x1080 desktop yields ~100 text regions; a Google Images page more.
+# This rides along in every stored row, so it is capped — but *which* ones we
+# keep matters more than how many.
+_MAX_DETECTIONS = 120
+
+
+def _keep_detections(detections) -> list:
+    """Pick the regions worth storing, most informative first.
+
+    This used to be `detections[:40]`, taking the first 40 in reading order.
+    Reading order starts at the top of the screen, which on any browser is the
+    tab strip, the URL bar and the bookmarks bar — so the stored evidence was
+    ~40 fragments of browser chrome and the entire page body was thrown away.
+    The panel then drew its "where the engine looked" overlay from that, and
+    every box landed on the tabs, which reads as "OCR can't see the page".
+
+    Detection itself was never affected: the classifier scores the full OCR
+    text. This is the evidence trail, and it was showing the least interesting
+    40 regions on screen.
+
+    Ordering: anything that matched a rule first, then longer text over
+    fragments like "G" or "x", so the stored sample is readable content rather
+    than punctuation. Picture regions are always kept — there is at most one
+    and it is what the vision model was shown.
+    """
+    items = list(detections or [])
+    pictures = [d for d in items if d.get("kind") == "picture"]
+    text = [d for d in items if d.get("kind") != "picture"]
+
+    def rank(d):
+        try:
+            score = float(d.get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        return (-score, -len((d.get("text") or "").strip()))
+
+    text.sort(key=rank)
+    room = max(0, _MAX_DETECTIONS - len(pictures))
+    return pictures + text[:room]

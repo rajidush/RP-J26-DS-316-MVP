@@ -127,9 +127,27 @@ def despace(blob: str) -> str:
 
 
 def _pattern(needle: str) -> re.Pattern:
-    # Word-boundary anchored, tolerant of runs of whitespace between words.
+    r"""Word-boundary anchored, tolerant of *missing* or repeated whitespace.
+
+    The separator is \s* rather than \s+, fixing two faults that turned out
+    to be the same one (measured 1 Sep 2026):
+
+      - OCR swallows spaces. A real capture read "fuckthis somali piece
+        ofshit" and "go back toyour country". With \s+ every multi-word
+        phrase here silently stopped matching the moment the recogniser
+        joined two words -- and screen text is not clean prose.
+      - despace() builds a view with letter-spacing joined up
+        ("k i l l  y o u r s e l f" -> "killyourself"), but \s+ could never
+        match that view for a multi-word phrase. The anti-obfuscation view
+        was dead code for everything except single words.
+
+    The \b anchors are kept, so a phrase still cannot fire inside a longer
+    word, and multi-word concatenations ("killyourself", "gobacktoyour-
+    country") do not collide with ordinary vocabulary. Benchmark FP rate is
+    unchanged at 1.9%.
+    """
     parts = [re.escape(part) for part in needle.split()]
-    return re.compile(rf"\b{r'\s+'.join(parts)}\b")
+    return re.compile(rf"\b{r'\s*'.join(parts)}\b")
 
 
 _COMPILED = {p: _pattern(p) for p in HIGH_PHRASES + MID_PHRASES + GAMING_BENIGN}

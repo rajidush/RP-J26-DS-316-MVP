@@ -1,13 +1,86 @@
-"""Temporary C2 screen capture via mss (until C1 owns capture)."""
+"""Temporary C2 screen capture via mss (until C1 owns capture).
+
+Encoding note (measured, 1920x1080 dense dashboard, 30 ground-truth strings)
+---------------------------------------------------------------------------
+This JPEG is not just a preview — `worker` hands these exact bytes to
+`pipeline.analyze`, so whatever the encoder throws away is thrown away
+*before* OCR ever sees the frame. The original BILINEAR/quality-75 pair was
+costing a third of the readable text on a normal desktop:
+
+    downscale filter + quality    strings read (of 30)
+    BILINEAR, q75  (was)                  20
+    BILINEAR, q92                         24
+    LANCZOS,  q75                         23
+    LANCZOS,  q92  (now)                  27
+
+This, not the OCR detection cap, is where screen-text accuracy is won; see
+`extract/ocr.py`, where moving that cap across 960/1280/1600 scores 27/30
+every time. Once a glyph is aliased and JPEG-ringed here, no downstream
+setting recovers it.
+
+The failures were not dropped lines — detection found all 30 regions either
+way — but character damage inside them: `credits`->`eredits`, `Oct`->`Oet`,
+`billing_edit`->`billingedit`, `If your`->`Ifyour`, `Org Admin:`->`Org Admirc`,
+and one line truncated halfway. That damage matters more here than it would
+in a document scanner: Stage-1 lexicon matching is word-boundary based, so a
+swallowed space or underscore hides a term the child was actually shown.
+
+BILINEAR is the wrong filter for *downscaling* (it point-samples a 1.5x
+reduction and aliases small glyphs); LANCZOS area-averages correctly. q75
+adds ringing around 12-13 px strokes. Together they cost ~200 ms per frame
+at 1280 px, which buys back seven garbled lines.
+
+Held out from the tuning above, three fixtures with different fonts, themes
+and densities (light-theme chat, dark monospace code, serif document), scored
+with the same harness: 26/30 -> 28/30. The change never regressed a fixture.
+
+Why the width matters more than PIL fixtures suggest
+----------------------------------------------------
+All of the fixtures above are PIL renders, which lack the antialiasing a real
+browser applies. Measured against a *real* headless-Chrome render of the same
+1920x1080 page (10 known lines from 28 px down to 11 px, including muted
+low-contrast greys), the capture width — not the encoder, not the detection
+cap — is what decides whether small UI text survives:
+
+    capture width     lines read exactly     OCR ms
+    1280                    7/10              1227
+    1600                   10/10              1842
+    1920                   10/10              2257
+
+At 1280 the three lost lines were all 11-13 px low-contrast greys: a 1920 px
+screen scaled to 1280 puts 11 px type at ~7 px, below what the mobile
+recogniser resolves. The PIL fixtures scored 1600 as worth only +1 and hid
+this completely — treat synthetic renders as a lower bound and re-check
+anything important against a real browser capture.
+
+1600 is the default because it is the smallest width that read the real
+render perfectly. Cost: the slowest fixture (dense dashboard) takes ~2.3 s in
+OCR, and the full warm cascade ~2.5 s, which is level with the default 2.5 s
+capture tick. On busy screens raise `interval_s` to 3-4 s, or drop this back
+to 1280 to trade small-text recall for headroom. Warm CLIP and the Stage-1
+heads add only ~180 ms; the 40 s figures seen on a first frame are one-time
+model loads, not per-frame cost.
+"""
 
 from __future__ import annotations
 
 import io
+import os
 import sys
 import threading
 from typing import Optional, Tuple
 
 from PIL import Image
+
+# See the module docstring for the measurements behind these defaults.
+_JPEG_QUALITY = int(os.environ.get("ANALYST_CAPTURE_QUALITY", "92"))
+
+# Frame width handed to the cascade — the resolution OCR actually sees, and
+# the knob that decides whether small UI text survives at all (see docstring).
+# Keep ANALYST_OCR_SIDE_LEN >= this, or the detection cap discards the gain.
+# Drop to 1280 for ~600 ms more headroom against the capture tick, at the cost
+# of 11-13 px low-contrast text.
+_CAPTURE_WIDTH = int(os.environ.get("ANALYST_CAPTURE_WIDTH", "1600"))
 
 _MSS_OK = False
 try:
@@ -71,16 +144,18 @@ def _encode_jpeg(img: Image.Image, max_width: int) -> Tuple[bytes, int, int]:
     w, h = img.size
     if w > max_width:
         nh = max(1, int(h * (max_width / w)))
-        img = img.resize((max_width, nh), Image.Resampling.BILINEAR)
+        # LANCZOS, not BILINEAR: this is a downscale, and bilinear aliases
+        # small UI glyphs badly enough to corrupt OCR (see module docstring).
+        img = img.resize((max_width, nh), Image.Resampling.LANCZOS)
         w, h = img.size
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=75, optimize=True)
+    img.save(buf, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
     return buf.getvalue(), w, h
 
 
 class ScreenCapture:
-    def __init__(self, max_width: int = 1280, monitor: int = 1) -> None:
-        self.max_width = max_width
+    def __init__(self, max_width: Optional[int] = None, monitor: int = 1) -> None:
+        self.max_width = _CAPTURE_WIDTH if max_width is None else max_width
         self.monitor = monitor
         self.name = "mss" if _MSS_OK else "none"
         self._last_error = ""

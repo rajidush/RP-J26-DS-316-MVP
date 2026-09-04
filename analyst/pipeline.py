@@ -35,6 +35,7 @@ from .decide import STAGE1_THETA, decide
 from .extract.asr import AsrEngine
 from .extract.embed import ImageEmbedder
 from .extract.ocr import OcrEngine
+from .whitebox.live import LIVE, check as live_check, stage as live_stage
 from .extract.vision_meaning import VisionMeaning
 from .schemas import AnalystRunResult, new_id
 from .stage1.image_fast import ImageFast
@@ -102,7 +103,13 @@ class AnalystPipeline:
             )
 
         trigger_id = corr or new_id()
-        with self.buffer.hold(trigger_id, frame=image_bytes, audio=audio_bytes) as slot:
+        # live_check() brackets the whole analysis: it flags "a check is running
+        # now" for the panel, and on exit clears any stage still marked active.
+        # That last part matters — a scorer raising between a begin/end pair
+        # would otherwise leave its box pulsing in the diagram forever.
+        with live_check(app_exe), self.buffer.hold(
+            trigger_id, frame=image_bytes, audio=audio_bytes
+        ) as slot:
             result = self._run(
                 child_age=child_age,
                 overlay_text=overlay_text or "",
@@ -127,7 +134,8 @@ class AnalystPipeline:
             regions: list = []
             try:
                 if image is not None:
-                    text, regions = self.ocr.read(image)
+                    with live_stage("ocr"):
+                        text, regions = self.ocr.read(image)
                 else:
                     text = ""
             except Exception as exc:
@@ -138,7 +146,11 @@ class AnalystPipeline:
         def _timed_asr():
             t = time.perf_counter()
             try:
-                text = self.asr.transcribe(audio) if audio else ""
+                if audio:
+                    with live_stage("audio"):
+                        text = self.asr.transcribe(audio)
+                else:
+                    text = ""
             except Exception as exc:
                 notes.append(f"asr_failed:{type(exc).__name__}")
                 text = ""
@@ -289,7 +301,11 @@ class AnalystPipeline:
         if not (self.vision_meaning.enabled and image is not None):
             return None
         try:
-            reading = self.vision_meaning.read(image)
+            # The context manager, not a begin/end pair: the early return on
+            # failure below would otherwise leave this stage marked "running"
+            # forever in the live diagram.
+            with live_stage("vlm"):
+                reading = self.vision_meaning.read(image)
         except Exception as exc:
             notes.append(f"vision_meaning_failed:{type(exc).__name__}")
             return None
@@ -332,15 +348,30 @@ class AnalystPipeline:
         # yellow text saying...") was appended. Descriptive prose about harmful
         # content dilutes the model's reading of the harmful content itself.
         # Scoring each source on its own preserves whichever one is strongest.
-        picture_words = reading.combined() if reading else ""
-        read_blob = " ".join(p for p in (overlay_text, ocr_text, transcript) if p).strip()
+        with live_stage("s1_join"):
+            picture_words = reading.combined() if reading else ""
+            read_blob = " ".join(p for p in (overlay_text, ocr_text, transcript) if p).strip()
 
         t_s1 = time.perf_counter()
-        detail = self._score_text(read_blob, notes)
-        picture_detail = self._score_text(picture_words, notes) if picture_words else None
-        if picture_detail is not None and picture_detail.score > detail.score:
-            notes.append("picture_reading_led")
-            detail = picture_detail
+        # Sub-steps are marked individually. Timing the Stage-1 window as one
+        # unit made the panel light all six of its boxes at the same instant,
+        # each showing the same total — which reads as "everything happened at
+        # once" rather than as the sequence the code actually runs.
+        with live_stage("s1_words"):
+            detail = self._score_text(read_blob, notes)
+        # An explicit lexicon hit in the top band skips the ~180 ms model call
+        # (see stage1/text_fast.score_detailed). That is why an obvious slur is
+        # the *fastest* path through Stage 1, and the panel should say so rather
+        # than claiming models that never ran.
+        LIVE.mark("s1_models_ran", detail.model_score is not None)
+        picture_detail = None
+        if picture_words:
+            with live_stage("s1_picwords"):
+                picture_detail = self._score_text(picture_words, notes)
+        with live_stage("s1_merge"):
+            if picture_detail is not None and picture_detail.score > detail.score:
+                notes.append("picture_reading_led")
+                detail = picture_detail
 
         # Kept whole for Stage 2, which re-reads text Stage 1 truncated.
         text_blob = " ".join(p for p in (read_blob, picture_words) if p).strip()
@@ -349,13 +380,15 @@ class AnalystPipeline:
         # --- vision channel: judgements about pixels --------------------------
         t_clip = time.perf_counter()
         try:
-            emb = self.embed.embed(image) if image is not None else []
+            with live_stage("clip"):
+                emb = self.embed.embed(image) if image is not None else []
         except Exception as exc:
             notes.append(f"clip_failed:{type(exc).__name__}")
             emb = []
         latency["clip_ms"] = round((time.perf_counter() - t_clip) * 1000, 1)
 
-        vision_score, caption_emb = self._score_picture(image, emb, ocr_text, notes)
+        with live_stage("s1_picture"):
+            vision_score, caption_emb = self._score_picture(image, emb, ocr_text, notes)
         vision_calibrated = bool(getattr(self.image_fast, "calibrated", False))
         latency["stage1_ms"] = round((time.perf_counter() - t_s1) * 1000, 1)
 
@@ -372,8 +405,9 @@ class AnalystPipeline:
         }
 
         # --- escalation: only calibrated evidence may escalate ---------------
-        vision_escalates = vision_calibrated and vision_score >= STAGE1_THETA
-        escalated = text_score >= STAGE1_THETA or vision_escalates
+        with live_stage("s1_gate"):
+            vision_escalates = vision_calibrated and vision_score >= STAGE1_THETA
+            escalated = text_score >= STAGE1_THETA or vision_escalates
 
         # Vision-only: a picture carried the signal and there were no words to
         # read. The category cannot come from the text scorer, so it comes from
@@ -392,18 +426,21 @@ class AnalystPipeline:
         full_text_score = text_score
         if escalated:
             try:
-                full_text_score = self.text_full.score(text_blob, text_score)
+                with live_stage("s2_reread"):
+                    full_text_score = self.text_full.score(text_blob, text_score)
                 if full_text_score > text_score:
                     notes.append("stage2_found_more_in_full_text")
             except Exception as exc:
                 notes.append(f"text_full_failed:{type(exc).__name__}")
 
+        LIVE.begin("s2_fuse")
         fusion = fuse_signals(
             [
                 Signal("text", full_text_score, True, "ocr/asr/overlay/vlm"),
                 Signal("vision", vision_score, vision_calibrated, self.image_fast.name),
             ]
         )
+        LIVE.end("s2_fuse")
         latency["stage2_ms"] = round((time.perf_counter() - t_s2) * 1000, 1)
 
         # stage2 stays numeric — the mode is carried by result.fusion_mode.
@@ -414,20 +451,23 @@ class AnalystPipeline:
 
         risk = fusion.fused if escalated else round(max(text_score, 0.0), 4)
 
-        decision, envelope, payload, cleared, mods = decide(
-            text_score=text_score,
-            vision_score=vision_score if vision_calibrated else 0.0,
-            fused_score=risk,
-            category=category if escalated else "none",
-            escalated=escalated,
-            child_age=child_age,
-            ocr_text=ocr_text,
-            transcript=transcript,
-            lexicon_hits=hits,
-            app_exe=app_exe,
-            app_category=app_category,
-            corr=corr,
-        )
+        # Marked like every other stage: without this the final box never
+        # lights, and the flow looks like it stops before reaching a verdict.
+        with live_stage("decide"):
+            decision, envelope, payload, cleared, mods = decide(
+                text_score=text_score,
+                vision_score=vision_score if vision_calibrated else 0.0,
+                fused_score=risk,
+                category=category if escalated else "none",
+                escalated=escalated,
+                child_age=child_age,
+                ocr_text=ocr_text,
+                transcript=transcript,
+                lexicon_hits=hits,
+                app_exe=app_exe,
+                app_category=app_category,
+                corr=corr,
+            )
 
         risk_out = float(payload.score) if payload is not None else round(text_score, 4)
 

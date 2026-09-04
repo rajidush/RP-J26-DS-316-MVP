@@ -8,7 +8,14 @@ import threading
 import base64
 import urllib.request
 import onnxruntime as ort
-from typing import List, Dict, Optional, Tuple
+from collections import deque
+from typing import Deque, List, Dict, Optional, Tuple
+
+# How many per-frame analysis records to retain in memory. At the ~1.2 s
+# monitor tick this is roughly the last half hour, which is what the parent
+# dashboard reads; older entries fall off rather than accumulating forever.
+_ANALYSIS_LOG_MAX = 1500
+
 
 class ZeroTrustGuard:
     def __init__(self):
@@ -43,9 +50,19 @@ class ZeroTrustGuard:
         self.nsfw_score = 0.0
         self.violence_score = 0.0
         self.weapons_score = 0.0
-        self.session_captured_frames: List[Dict] = []
+        # Per-frame analysis records. Metadata only — timestamp, verdict and
+        # latency — never pixels. Bounded so a long session cannot grow without
+        # limit; the frames themselves are analysed in RAM and dropped.
+        self.session_captured_frames: Deque[Dict] = deque(maxlen=_ANALYSIS_LOG_MAX)
+        self.frames_analyzed = 0
         self._prev_custom_filename = None
         self._prev_smtc_title = None
+
+        # A previous build wrote every frame to captured_frames/ and only
+        # cleaned up on stop(), so any kill -9 left the whole session on disk
+        # (1.3 GB of screen captures was observed). Nothing writes there now;
+        # sweep whatever an older build left behind.
+        self._purge_frame_dir(reason="startup")
         
         # Paths for local model
         self.backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -119,36 +136,51 @@ class ZeroTrustGuard:
             self.prev_frame_gray = None
             print(f"Zero-Trust Guard simulation mode set to: {mode}")
 
-    def _mark_frame_threat(self, filepath: str, threat: bool = True):
+    def _mark_frame_threat(self, record_id: str, threat: bool = True,
+                           threat_type: str = "", latency_ms: float = 0.0):
+        """Complete the record opened by `_record_frame_analysis`."""
+        if not record_id:
+            return
         with self.lock:
-            for item in self.session_captured_frames:
-                if item["path"] == filepath:
+            for item in reversed(self.session_captured_frames):
+                if item.get("id") == record_id:
                     item["threat_detected"] = threat
+                    if threat_type:
+                        item["threat_type"] = threat_type
+                    if latency_ms:
+                        item["latency_ms"] = round(float(latency_ms), 1)
                     break
+
+    def _purge_frame_dir(self, reason: str = "") -> int:
+        """Delete anything left in captured_frames/ by an older build.
+
+        Kept as a sweeper even though nothing writes there any more: upgrading
+        from a build that did should not silently leave the old screenshots on
+        disk. Keeps the directory itself so the path stays valid.
+        """
+        removed = 0
+        try:
+            if os.path.exists(self.captured_frames_dir):
+                for fname in os.listdir(self.captured_frames_dir):
+                    fpath = os.path.join(self.captured_frames_dir, fname)
+                    if os.path.isfile(fpath):
+                        try:
+                            os.remove(fpath)
+                            removed += 1
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"Failed to purge captured_frames directory: {e}")
+        if removed:
+            print(f"Purged {removed} stale frame file(s) from captured_frames/"
+                  + (f" ({reason})" if reason else ""))
+        return removed
 
     def _cleanup_clean_frames(self):
         with self.lock:
-            # Delete session registered frames
-            for item in self.session_captured_frames:
-                path = item["path"]
-                try:
-                    if os.path.exists(path):
-                        os.remove(path)
-                        print(f"Deleted session frame: {path}")
-                except Exception as e:
-                    print(f"Failed to delete frame {path}: {e}")
-            self.session_captured_frames = []
-
-            # Purge any remaining files inside the directory, but keep the directory itself
-            try:
-                if os.path.exists(self.captured_frames_dir):
-                    for fname in os.listdir(self.captured_frames_dir):
-                        fpath = os.path.join(self.captured_frames_dir, fname)
-                        if os.path.isfile(fpath):
-                            os.remove(fpath)
-                            print(f"Purged file from directory: {fpath}")
-            except Exception as e:
-                print(f"Failed to purge captured_frames directory: {e}")
+            self.session_captured_frames.clear()
+            self.frames_analyzed = 0
+        self._purge_frame_dir(reason="session end")
 
     def reset(self):
         self._cleanup_clean_frames()
@@ -183,6 +215,12 @@ class ZeroTrustGuard:
                 "threat_type": self.threat_type,
                 "last_frame": self.last_frame_b64,
                 "model_loaded": self.model_loaded,
+
+                # Frame analysis record — timings and verdicts, no imagery.
+                # `last_frame` above is the live preview held in RAM for the UI
+                # and is not persisted anywhere.
+                "frames_analyzed": self.frames_analyzed,
+                "analysis_log": list(self.session_captured_frames)[-20:],
                 
                 # Telemetry fields
                 "video_name": self.video_name,
@@ -232,33 +270,36 @@ class ZeroTrustGuard:
             print(f"ONNX Session execution warning: {e}")
             return None
 
-    def _save_captured_frame(self, frame) -> str:
+    def _record_frame_analysis(self) -> str:
+        """Open a metadata record for the frame about to be analysed.
+
+        This used to be `_save_captured_frame`, which wrote the frame to
+        captured_frames/ with cv2.imwrite. Nothing ever read those files back —
+        `_evaluate_tri_model_threats` scores the in-memory `frame`, and the only
+        other use of the path was `_mark_frame_threat` setting a flag that was
+        itself never read. They were pure write-only cost, and because cleanup
+        ran only from stop()/reset(), an abrupt kill stranded the entire
+        session's screenshots on disk. The frame now stays in RAM for the length
+        of the analysis and is dropped when it goes out of scope, which is what
+        the project's privacy rule requires; the timing record below is what
+        callers actually wanted.
+
+        Returns the record id used by `_mark_frame_threat`.
+        """
         with self.lock:
             if not self.is_monitoring:
                 return ""
-        try:
-            os.makedirs(self.captured_frames_dir, exist_ok=True)
-            timestamp = time.strftime("frame_%Y%m%d_%H%M%S")
-            timestamp_ms = int((time.time() - int(time.time())) * 1000)
-            filename = f"{timestamp}_{timestamp_ms}.jpg"
-            filepath = os.path.join(self.captured_frames_dir, filename)
-            cv2.imwrite(filepath, frame)
-            with self.lock:
-                if not self.is_monitoring:
-                    try:
-                        if os.path.exists(filepath):
-                            os.remove(filepath)
-                    except Exception:
-                        pass
-                    return ""
-                self.session_captured_frames.append({
-                    "path": filepath,
-                    "threat_detected": False
-                })
-            return filepath
-        except Exception as e:
-            print(f"Failed to save captured frame: {e}")
-            return ""
+            self.frames_analyzed += 1
+            record_id = f"f{self.frames_analyzed}"
+            self.session_captured_frames.append({
+                "id": record_id,
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "monotonic": round(time.perf_counter(), 3),
+                "threat_detected": False,
+                "threat_type": "",
+                "latency_ms": 0.0,
+            })
+            return record_id
 
     def _evaluate_tri_model_threats(self, frame, filename: str = "") -> Tuple[float, float, float, float, str, List[Dict]]:
         start_time = time.perf_counter()
@@ -424,8 +465,8 @@ class ZeroTrustGuard:
             self._cleanup_clean_frames()
             self._prev_custom_filename = filename
 
-        # Save captured frame locally to directory
-        filepath = self._save_captured_frame(frame)
+        # Open a metadata record. The frame itself is never written to disk.
+        record_id = self._record_frame_analysis()
 
         # 2. Phase 1: Process Scan
         processes = self._scan_processes()
@@ -460,8 +501,7 @@ class ZeroTrustGuard:
         threat_score = max(nsfw_score, violence_score, weapons_score)
 
         is_threat = nsfw_score > 0.80 or violence_score > 0.80 or weapons_score > 0.75
-        if is_threat and filepath:
-            self._mark_frame_threat(filepath, True)
+        self._mark_frame_threat(record_id, is_threat, threat_type, latency_ms)
 
         # 6. Render bounding boxes directly onto visual stream frame
         try:
@@ -687,16 +727,15 @@ class ZeroTrustGuard:
                 return
         
         if frame is not None:
-            # Save the captured frame locally
-            filepath = self._save_captured_frame(frame)
-            
+            # Open a metadata record. The frame itself is never written to disk.
+            record_id = self._record_frame_analysis()
+
             # Evaluate frame
             nsfw_score, violence_score, weapons_score, latency_ms, threat_type, detections = self._evaluate_tri_model_threats(frame, playback.get("smtc_title", ""))
             threat_score = max(nsfw_score, violence_score, weapons_score)
-            
+
             is_threat = nsfw_score > 0.80 or violence_score > 0.80 or weapons_score > 0.75
-            if is_threat and filepath:
-                self._mark_frame_threat(filepath, True)
+            self._mark_frame_threat(record_id, is_threat, threat_type, latency_ms)
             
             # Draw overlay visualization
             try:

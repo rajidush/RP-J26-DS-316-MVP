@@ -19,6 +19,80 @@ became 3345x736 — a 2.5 MP detection input for one line of text. Capping the
 The angle classifier is off because screen text is upright; re-enable it with
 ANALYST_OCR_CLS=1 if rotated content matters. Every knob is env-overridable so
 a slower, more thorough profile is one variable away.
+
+This cap is NOT where OCR accuracy is won (measured 1 Sep 2026)
+--------------------------------------------------------------
+Screen text was being read badly, and this cap looked like the obvious cause:
+`capture/screen` hands over a 1280 px frame, so a 960 cap resizes it again.
+It is not the cause. Holding the capture encoder at LANCZOS/q92 and moving
+only this knob, on a 1920x1080 dashboard fixture with 30 known strings:
+
+    detection cap      strings read (of 30)      ms
+    960                        27               2432
+    1280                       27               2275
+    1600                       27               2354
+
+Identical. The entire loss was upstream in the capture encoder — see the
+table in `capture/screen.py`, where BILINEAR/q75 -> LANCZOS/q92 moves the
+same fixture from 20/30 to 27/30. Raising this cap *alone*, with the old
+encoder, also changed nothing (20/30). Text that was aliased and
+JPEG-ringed before detection cannot be recovered by detecting it larger.
+
+What this knob must NOT do is bind below the capture width. It is the ceiling
+on what detection sees, so it has to track `ANALYST_CAPTURE_WIDTH` (now 1600):
+capture hands over a 1600 px frame, and a 960 or 1280 cap would shrink it
+again and throw away exactly the small-text recall that widening capture just
+bought. That is why this default moves with it rather than independently.
+
+So: raise capture width to read smaller text, and keep this at or above it.
+Raising this alone buys nothing — fix the encoder and the width instead.
+
+Why v6 tiny (measured 1 Sep 2026, this CPU, real captured frame)
+---------------------------------------------------------------
+The defaults were PP-OCRv5 mobile, chosen when v6 was benchmarked only on
+clean chat-bar assets where it looked ~2.4x slower. Re-measured on a real
+1100 px capture of a browser showing a PDF of captioned memes -- 12 known
+phrases, warm timings, servers stopped:
+
+    model                phrases    warm ms
+    v4 mobile              9/12       1574
+    v5 mobile (was)        9/12       2951
+    v6 small              11/12       3034
+    v6 tiny (now)         12/12        738
+
+The smallest model is both the most accurate here and 4.0x faster than the
+v5 mobile it replaces, which also pulls OCR back inside the 2.5 s capture
+tick (it was over budget on dense screens). This matches the PP-OCRv6 paper's
+"3.9x faster than PP-OCRv5_mobile on Intel Xeon".
+
+Note the paper rates tiny at 73.5% -- *below* v5 server -- on its in-house
+multilingual document benchmark. That is a different distribution: English
+screen text with UI chrome is what we run on, and tiny leads there. Do not
+promote these numbers as general OCR accuracy.
+
+One difference from v5, checked and found not to matter in practice: on a
+*synthetic* near-empty canvas -- one short line on 1920x1080 of plain white --
+the v6 detector returns zero regions up to ~16 px, where v5 reads it. It needs
+both conditions to trigger. Re-tested on realistic sparse screens the two are
+identical:
+
+    fixture                     v5 regions   v6 regions
+    chat window, 3 messages         4            4
+    document with one heading       1            1
+
+both reading the harmful line verbatim. So this is a property of blank-canvas
+detection normalisation, not a recall loss on real screens. Revert with
+ANALYST_OCR_VERSION=PPOCRV5 / ANALYST_OCR_MODEL_TYPE=MOBILE if a genuinely
+sparse capture ever reads as blank.
+
+Neither model changes the ~9 px glyph floor: at 8 px all four configs fail
+identically. That is a sampling limit, not a model-quality one.
+
+PP-OCRv5 SERVER det/rec weights were tried for the residual errors and did
+not finish a single frame inside 10 minutes on this CPU, so mobile stays.
+Three of the five remaining errors are `AI`->`Al`: in most sans UI fonts
+capital-I and lowercase-l are the same glyph, so that is not recoverable
+from pixels at all, by any engine.
 """
 
 from __future__ import annotations
@@ -32,27 +106,41 @@ from PIL import Image, ImageEnhance
 _MIN_WIDTH = 640
 
 # See the module docstring for the measurements behind these defaults.
-_DET_SIDE_LEN = int(os.environ.get("ANALYST_OCR_SIDE_LEN", "960"))
+_DET_SIDE_LEN = int(os.environ.get("ANALYST_OCR_SIDE_LEN", "1600"))
 _OCR_THREADS = int(os.environ.get("ANALYST_OCR_THREADS", "4"))
 _OCR_USE_CLS = os.environ.get("ANALYST_OCR_CLS", "0").strip() in ("1", "true", "yes")
 # Sharpen/contrast enhancement, off by default — see _preprocess().
 _OCR_ENHANCE = os.environ.get("ANALYST_OCR_ENHANCE", "0").strip() in ("1", "true", "yes")
+# Model family. PP-OCRv6 tiny is both faster and more accurate here than the
+# v5 mobile pair it replaced — see "Why v6 tiny" in the module docstring.
+_OCR_VERSION = os.environ.get("ANALYST_OCR_VERSION", "PPOCRV6").strip().upper()
+_OCR_MODEL_TYPE = os.environ.get("ANALYST_OCR_MODEL_TYPE", "TINY").strip().upper()
+
+# Thorough mode: trade latency for recall by reading the frame more than once.
+# Off by default - it costs ~4x the time, which does not fit the 2.5 s capture
+# tick. See _read_thorough() for the measurements.
+_THOROUGH = os.environ.get("ANALYST_OCR_THOROUGH", "0").strip() in ("1", "true", "yes")
+_TILE_GRID = int(os.environ.get("ANALYST_OCR_TILE_GRID", "2"))
+_TILE_ZOOM = float(os.environ.get("ANALYST_OCR_TILE_ZOOM", "2"))
+_TILE_OVERLAP = float(os.environ.get("ANALYST_OCR_TILE_OVERLAP", "0.06"))
 
 
 def _rapid3_params() -> dict:
     """Screen-capture profile for RapidOCR 3.x (see module docstring)."""
     from rapidocr import ModelType, OCRVersion
 
+    version = getattr(OCRVersion, _OCR_VERSION, OCRVersion.PPOCRV6)
+    model_type = getattr(ModelType, _OCR_MODEL_TYPE, ModelType.TINY)
     return {
         # Cap the LONGER side. The default caps the shorter side, which upscales
         # wide-and-short screenshots into megapixel detection inputs.
         "Det.limit_type": "max",
         "Det.limit_side_len": _DET_SIDE_LEN,
-        # PP-OCRv5 mobile: same text on our assets, ~2.4x faster than v6 small.
-        "Det.ocr_version": OCRVersion.PPOCRV5,
-        "Det.model_type": ModelType.MOBILE,
-        "Rec.ocr_version": OCRVersion.PPOCRV5,
-        "Rec.model_type": ModelType.MOBILE,
+        # PP-OCRv6 tiny — see "Why v6 tiny" in the module docstring.
+        "Det.ocr_version": version,
+        "Det.model_type": model_type,
+        "Rec.ocr_version": version,
+        "Rec.model_type": model_type,
         # Small models contend on 12 threads; 4 measured fastest here.
         "EngineConfig.onnxruntime.intra_op_num_threads": _OCR_THREADS,
         "Global.use_cls": _OCR_USE_CLS,
@@ -163,6 +251,8 @@ class OcrEngine:
         """
         if image is None:
             return "", []
+        if _THOROUGH and self._rapid is not None:
+            return self._read_thorough(image)
         if self._rapid is not None:
             try:
                 arr = _preprocess(image)
@@ -190,9 +280,135 @@ class OcrEngine:
                 return "", []
         return "", []
 
+    def _read_once(self, image: Image.Image):
+        """One pass over exactly this image. Boxes normalised to 0..1 of it."""
+        arr = _preprocess(image)
+        raw = self._rapid(arr)
+        h, w = arr.shape[0], arr.shape[1]
+        if self._rapid_api == "object":
+            lines = list(getattr(raw, "txts", None) or [])
+            polys = getattr(raw, "boxes", None)
+            confs = list(getattr(raw, "scores", None) or [])
+        else:
+            result = raw[0] if isinstance(raw, tuple) else raw
+            rows = [r for r in (result or []) if len(r) > 1 and r[1]]
+            lines = [r[1] for r in rows]
+            polys = [r[0] for r in rows]
+            confs = [r[2] if len(r) > 2 else 0.0 for r in rows]
+        return _regions(polys, lines, confs, w, h)
+
+    def _read_thorough(self, image: Image.Image) -> Tuple[str, list]:
+        """Read the frame whole, then again in overlapping magnified tiles.
+
+        Why (measured 2 Sep 2026, live 1920x1080 desktop, PP-OCRv6 tiny):
+
+            strategy                    unique regions   chars      s
+            native 1920 (default)             89          2659    21.0
+            2x upscale only                   84          2655    21.6
+            2x2 tiles, each 2x                97          2843    47.5
+            native + tiles                   127          4035    68.6
+            native + tiles + 2x upscale      135          4434    90.1
+
+        Small, low-contrast UI text sits near the recogniser's ~9 px floor.
+        Magnifying a *crop* puts those glyphs back above it, and the tiles
+        overlap so a line split by a seam survives whole in a neighbour. The
+        passes disagree about segmentation, so the union recovers ~67% more
+        text than any single pass - but no single pass is a superset, which is
+        why this merges rather than replaces.
+
+        Not the default: ~4x the latency does not fit the 2.5 s capture tick.
+        Enable per run with ANALYST_OCR_THOROUGH=1.
+        """
+        regions = list(self._read_once(image))
+        w, h = image.size
+        grid = max(1, _TILE_GRID)
+        if grid > 1 and w > 0 and h > 0:
+            pad_x, pad_y = int(w * _TILE_OVERLAP), int(h * _TILE_OVERLAP)
+            for gx in range(grid):
+                for gy in range(grid):
+                    x0 = max(0, gx * w // grid - pad_x)
+                    y0 = max(0, gy * h // grid - pad_y)
+                    x1 = min(w, (gx + 1) * w // grid + pad_x)
+                    y1 = min(h, (gy + 1) * h // grid + pad_y)
+                    if x1 - x0 < 16 or y1 - y0 < 16:
+                        continue
+                    crop = image.crop((x0, y0, x1, y1))
+                    if _TILE_ZOOM > 1:
+                        crop = crop.resize(
+                            (int(crop.width * _TILE_ZOOM), int(crop.height * _TILE_ZOOM)),
+                            Image.LANCZOS,
+                        )
+                    tw, th = x1 - x0, y1 - y0
+                    for reg in self._read_once(crop):
+                        bx0, by0, bx1, by1 = reg["box"]
+                        # tile-relative 0..1 -> absolute px -> frame 0..1
+                        reg["box"] = [
+                            round((x0 + bx0 * tw) / w, 4),
+                            round((y0 + by0 * th) / h, 4),
+                            round((x0 + bx1 * tw) / w, 4),
+                            round((y0 + by1 * th) / h, 4),
+                        ]
+                        regions.append(reg)
+        regions = _dedupe(regions)
+        # Reading order, so the joined blob is coherent for the scorers.
+        regions.sort(key=lambda r: (round(r["box"][1], 2), r["box"][0]))
+        text = " ".join(r["text"] for r in regions if r.get("text")).strip()
+        return text, regions
+
     def extract(self, image: Optional[Image.Image]) -> str:
         """Text only. Prefer read() when the caller also wants positions."""
         return self.read(image)[0]
+
+
+def _norm_text(s: str) -> str:
+    return " ".join((s or "").lower().split())
+
+
+def _iou(a, b) -> float:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    iw, ih = max(0.0, ix1 - ix0), max(0.0, iy1 - iy0)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+    area_b = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _dedupe(regions: list) -> list:
+    """Merge passes that saw the same text.
+
+    The whole-frame pass and the magnified tiles overlap by design, so the
+    same line is usually read more than once - sometimes with different
+    segmentation ("Chat and Cowork" vs "Chat and" + "Cowork"). Two regions are
+    the same when their text matches after case/whitespace normalisation *and*
+    they overlap on screen; identical strings in different places (a repeated
+    button label) are kept, which is why position is part of the test.
+
+    When the same text is seen twice, keep the higher-confidence read.
+    """
+    out: list = []
+    for reg in regions:
+        txt = _norm_text(reg.get("text", ""))
+        if not txt:
+            continue
+        merged = False
+        for i, kept in enumerate(out):
+            if _norm_text(kept.get("text", "")) != txt:
+                continue
+            if _iou(kept["box"], reg["box"]) < 0.1:
+                continue
+            if float(reg.get("conf", 0) or 0) > float(kept.get("conf", 0) or 0):
+                out[i] = reg
+            merged = True
+            break
+        if not merged:
+            out.append(reg)
+    return out
 
 
 def _regions(polys, lines, confs, width: int, height: int) -> list:

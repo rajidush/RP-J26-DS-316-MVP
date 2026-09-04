@@ -32,3 +32,7 @@ analyst/models/probe_embeddings.npz
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Zero-Trust Guard writes full screen captures here while it runs (~19 MB/min).
+# They are pictures of whoever is using the machine and must never be committed.
+offline_backend/captured_frames/
