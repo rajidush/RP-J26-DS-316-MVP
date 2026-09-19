@@ -12,7 +12,7 @@ import tts_engine
 
 app = FastAPI(
     title="Socratic Digital Child Safety Engine",
-    description="Offline Cognitive State-Machine Prototype safeguarding minors through pedagogical dialog."
+    description="Offline Cognitive State-Machine Prototype safeguarding minors through pedagogical dialog..."
 )
 
 # Enable CORS for frontend web and Electron integration
